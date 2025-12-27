@@ -153,7 +153,10 @@ public struct AQLCollectionExpression: AQLExpression {
 
         // Convert to collection
         let collection: [any EcoreValue]
-        if let array = sourceValue as? [any EcoreValue] {
+        if let valueArray = sourceValue as? EcoreValueArray {
+            // Unwrap EcoreValueArray to get the underlying values
+            collection = valueArray.values
+        } else if let array = sourceValue as? [any EcoreValue] {
             collection = array
         } else {
             // Single element becomes single-element collection
