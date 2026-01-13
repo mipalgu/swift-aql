@@ -277,5 +277,5 @@ AQL is based on OCL but differs in:
 
 ## See Also
 
-- [Eclipse Acceleo](https://eclipse.dev/acceleo/) - The reference AQL implementation
-- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/) - The query language foundation
+- [Eclipse Acceleo](https://eclipse.dev/acceleo/)
+- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)

@@ -85,7 +85,7 @@ let result = try await query.evaluate(in: context, self: myClass)
 - ``AQLError``
 - ``AQLParseError``
 
-### References
+## See Also
 
 - [Eclipse Acceleo](https://eclipse.dev/acceleo/)
 - [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
