@@ -47,3 +47,11 @@ swift test
 ## Licence
 
 See the details in the LICENCE file.
+
+## References
+
+This implementation is based on the following standards and technologies:
+
+- [Eclipse Acceleo](https://eclipse.dev/acceleo/) - The reference AQL implementation
+- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/) - The query language foundation
+- [Eclipse Modeling Framework (EMF)](https://eclipse.dev/emf/) - The metamodelling foundation
