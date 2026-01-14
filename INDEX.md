@@ -17,12 +17,6 @@ dependencies: [
 - Swift 6.0 or later
 - macOS 15.0+ or Linux
 
-## Documentation
-
-- [Getting Started](https://mipalgu.github.io/swift-aql/documentation/aql/gettingstarted)
-- [Understanding AQL](https://mipalgu.github.io/swift-aql/documentation/aql/understandingaql)
-- [API Reference](https://mipalgu.github.io/swift-aql/documentation/aql)
-
 ## References
 
 - [Eclipse Acceleo](https://eclipse.dev/acceleo/)
@@ -35,3 +29,8 @@ dependencies: [
 - [swift-atl](https://github.com/mipalgu/swift-atl) - ATL model transformations
 - [swift-mtl](https://github.com/mipalgu/swift-mtl) - MTL code generation
 - [swift-modelling](https://github.com/mipalgu/swift-modelling) - Unified MDE toolkit
+
+## Documentation
+
+The package provides model query and navigation capabilities.
+For details, see [Getting Started](https://mipalgu.github.io/swift-aql/documentation/aql/gettingstarted) and [Understanding AQL](https://mipalgu.github.io/swift-aql/documentation/aql/understandingaql).
