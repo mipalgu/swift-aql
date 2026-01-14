@@ -1,6 +1,9 @@
 # Swift AQL
 
-A pure Swift implementation of the [Acceleo Query Language (AQL)](https://eclipse.dev/acceleo/documentation/) for model querying.
+The [swift-aql](https://github.com/mipalgu/swift-aql) package provides
+a pure Swift implementation of the
+[Acceleo Query Language (AQL)](https://eclipse.dev/acceleo/documentation/)
+for model querying.
 
 ## Installation
 
