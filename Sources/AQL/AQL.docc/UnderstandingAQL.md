@@ -4,11 +4,13 @@ Learn the fundamental concepts of the Acceleo Query Language.
 
 ## Overview
 
-[AQL (Acceleo Query Language)](https://eclipse.dev/acceleo/documentation/) is an
+AQL (Acceleo Query Language)
+([AQL](https://eclipse.dev/acceleo/documentation/)) is an
 expression language designed for querying models. It provides a concise syntax for
 navigating model structures, filtering collections, and computing values.
 
-AQL is based on [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
+AQL is based on OMG OCL (Object Constraint Language)
+([OMG OCL](https://www.omg.org/spec/OCL/))
 semantics but with a simplified, more accessible syntax.
 
 ## Expression Types
