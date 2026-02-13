@@ -76,6 +76,11 @@ public struct AQLCallExpression: AQLExpression {
 
     @MainActor
     public func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
+        // Handle OCL type operations specially — type arg is a name, not a value
+        if methodName == "oclIsKindOf" || methodName == "oclIsTypeOf" || methodName == "oclAsType" {
+            return try await evaluateOCLTypeOperation(in: context)
+        }
+
         // Evaluate source if present
         let sourceValue = try await source?.evaluate(in: context)
 
@@ -101,6 +106,51 @@ public struct AQLCallExpression: AQLExpression {
         }
 
         throw AQLExecutionError.invalidOperation("Unknown method: \(methodName)")
+    }
+
+    // MARK: - OCL Type Operations
+
+    /// Evaluates OCL type operations (oclIsKindOf, oclIsTypeOf, oclAsType).
+    ///
+    /// These operations require special handling because the type argument is a type name literal,
+    /// not a runtime value. The type argument arrives as an `AQLVariableExpression` with the type name.
+    private func evaluateOCLTypeOperation(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
+        let sourceValue = try await source?.evaluate(in: context)
+
+        // Extract type name from the first argument expression
+        guard let firstArg = arguments.first,
+              let varExpr = firstArg as? AQLVariableExpression else {
+            throw AQLExecutionError.invalidOperation(
+                "\(methodName) requires a type name argument")
+        }
+        let typeName = varExpr.name
+
+        guard let eobj = sourceValue as? DynamicEObject else {
+            // Non-EObject: fall back to Swift type name comparison
+            if let sv = sourceValue {
+                let swiftTypeName = String(describing: Swift.type(of: sv))
+                switch methodName {
+                case "oclIsTypeOf": return swiftTypeName == typeName
+                case "oclIsKindOf": return swiftTypeName == typeName
+                case "oclAsType": return sourceValue
+                default: return false
+                }
+            }
+            return false
+        }
+
+        switch methodName {
+        case "oclIsTypeOf":
+            return eobj.eClass.name == typeName
+        case "oclIsKindOf":
+            return eobj.eClass.name == typeName
+                || eobj.eClass.allSuperTypes.contains { $0.name == typeName }
+        case "oclAsType":
+            // Dynamic objects: casting is a no-op, the object already has all features
+            return sourceValue
+        default:
+            throw AQLExecutionError.invalidOperation("Unknown OCL type operation: \(methodName)")
+        }
     }
 
     // MARK: - Standard Library
