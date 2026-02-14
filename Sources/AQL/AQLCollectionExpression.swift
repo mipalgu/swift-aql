@@ -401,7 +401,14 @@ public struct AQLCollectionExpression: AQLExpression {
             // Direct form: collection->indexOf(element)
             let searchValue = try await body.evaluate(in: context)
             for (index, element) in collection.enumerated() {
-                if String(describing: element) == String(describing: searchValue as Any) {
+                // Compare by EObject identity (UUID) if both are EObjects,
+                // otherwise fall back to string comparison
+                if let eObjA = element as? (any EObject),
+                   let eObjB = searchValue as? (any EObject) {
+                    if eObjA.id == eObjB.id {
+                        return index
+                    }
+                } else if String(describing: element) == String(describing: searchValue as Any) {
                     return index
                 }
             }
