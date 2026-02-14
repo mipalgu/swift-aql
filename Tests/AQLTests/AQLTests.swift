@@ -376,4 +376,127 @@ struct AQLTests {
 
         #expect(result as? Bool == true)
     }
+
+    // MARK: - Unary Operators
+
+    @Test func testNotOperatorTrue() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .not,
+            operand: AQLLiteralExpression(value: true)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Bool == false)
+    }
+
+    @Test func testNotOperatorFalse() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .not,
+            operand: AQLLiteralExpression(value: false)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Bool == true)
+    }
+
+    @Test func testNotOperatorWithNil() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .not,
+            operand: AQLLiteralExpression(value: nil)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result == nil)
+    }
+
+    @Test func testNotOperatorNested() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        // not (not true) should be true
+        let expr = AQLUnaryExpression(
+            op: .not,
+            operand: AQLUnaryExpression(
+                op: .not,
+                operand: AQLLiteralExpression(value: true)
+            )
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Bool == true)
+    }
+
+    @Test func testNegateInteger() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .negate,
+            operand: AQLLiteralExpression(value: 42)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Int == -42)
+    }
+
+    @Test func testNegateDouble() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .negate,
+            operand: AQLLiteralExpression(value: 3.14)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Double == -3.14)
+    }
+
+    @Test func testNegateNil() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        let expr = AQLUnaryExpression(
+            op: .negate,
+            operand: AQLLiteralExpression(value: nil)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result == nil)
+    }
+
+    @Test func testNotOperatorInBinaryExpression() async throws {
+        let engine = ECoreExecutionEngine(models: [:])
+        let context = AQLExecutionContext(executionEngine: engine)
+
+        // not true and false should be false
+        let expr = AQLBinaryExpression(
+            left: AQLUnaryExpression(
+                op: .not,
+                operand: AQLLiteralExpression(value: true)
+            ),
+            op: .and,
+            right: AQLLiteralExpression(value: false)
+        )
+
+        let result = try await expr.evaluate(in: context)
+
+        #expect(result as? Bool == false)
+    }
 }
