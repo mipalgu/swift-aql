@@ -111,30 +111,47 @@ public struct AQLBinaryExpression: AQLExpression {
 
     @MainActor
     public func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
-        // Evaluate operands
-        let leftValue = try await left.evaluate(in: context)
-        let rightValue = try await right.evaluate(in: context)
-
-        // Handle null operands based on operator type
+        // Short-circuit evaluation for logical operators
         switch op {
         case .and:
+            let leftValue = try await left.evaluate(in: context)
+            if let leftBool = leftValue as? Bool, !leftBool {
+                return false  // short-circuit: false and _ = false
+            }
+            let rightValue = try await right.evaluate(in: context)
             return evaluateAnd(leftValue, rightValue)
         case .or:
+            let leftValue = try await left.evaluate(in: context)
+            if let leftBool = leftValue as? Bool, leftBool {
+                return true  // short-circuit: true or _ = true
+            }
+            let rightValue = try await right.evaluate(in: context)
             return evaluateOr(leftValue, rightValue)
         case .implies:
-            return evaluateImplies(leftValue, rightValue)
-        case .xor:
-            return evaluateXor(leftValue, rightValue)
-        case .equals:
-            return evaluateEquals(leftValue, rightValue)
-        case .notEquals:
-            return !evaluateEquals(leftValue, rightValue)
-        default:
-            // Arithmetic and comparison require non-null operands
-            guard let leftValue = leftValue, let rightValue = rightValue else {
-                return nil
+            let leftValue = try await left.evaluate(in: context)
+            if let leftBool = leftValue as? Bool, !leftBool {
+                return true  // short-circuit: false implies _ = true
             }
-            return try evaluateNonNull(leftValue, rightValue)
+            let rightValue = try await right.evaluate(in: context)
+            return evaluateImplies(leftValue, rightValue)
+        default:
+            // For all other operators, evaluate both operands eagerly
+            let leftValue = try await left.evaluate(in: context)
+            let rightValue = try await right.evaluate(in: context)
+            switch op {
+            case .xor:
+                return evaluateXor(leftValue, rightValue)
+            case .equals:
+                return evaluateEquals(leftValue, rightValue)
+            case .notEquals:
+                return !evaluateEquals(leftValue, rightValue)
+            default:
+                // Arithmetic and comparison require non-null operands
+                guard let leftValue = leftValue, let rightValue = rightValue else {
+                    return nil
+                }
+                return try evaluateNonNull(leftValue, rightValue)
+            }
         }
     }
 
