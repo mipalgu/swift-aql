@@ -37,6 +37,9 @@ import Foundation
 /// - `first()` - First element or null
 /// - `last()` - Last element or null
 ///
+/// ### Element Lookup
+/// - `indexOf(element)` - 0-based index of first matching element, or -1 if not found
+///
 /// ## Example Usage
 ///
 /// ```swift
@@ -86,6 +89,9 @@ public struct AQLCollectionExpression: AQLExpression {
         case notEmpty
         case first
         case last
+
+        // Element lookup
+        case indexOf
     }
 
     // MARK: - Properties
@@ -146,6 +152,8 @@ public struct AQLCollectionExpression: AQLExpression {
                 return false
             case .first, .last:
                 return nil
+            case .indexOf:
+                return -1
             default:
                 return nil  // Empty collection result
             }
@@ -188,6 +196,8 @@ public struct AQLCollectionExpression: AQLExpression {
             return collection.first
         case .last:
             return collection.last
+        case .indexOf:
+            return try await indexOf(collection, context: context)
         }
     }
 
@@ -354,5 +364,48 @@ public struct AQLCollectionExpression: AQLExpression {
         }
 
         return true
+    }
+
+    /// Returns the (0-based) index of the first element matching the body expression.
+    ///
+    /// When used with an iterator (`collection->indexOf(x | condition)`), it returns
+    /// the index of the first element where the condition is true. When used without
+    /// an iterator (`collection->indexOf(element)`), it returns the index of the first
+    /// element that is equal to the given element.
+    ///
+    /// - Parameters:
+    ///   - collection: The collection to search.
+    ///   - context: The AQL execution context.
+    /// - Returns: The 0-based index of the first matching element, or -1 if not found.
+    @MainActor
+    private func indexOf(
+        _ collection: [any EcoreValue],
+        context: AQLExecutionContext
+    ) async throws -> Int {
+        guard let body = body else {
+            throw AQLExecutionError.invalidOperation("indexOf requires an argument")
+        }
+
+        if let iterator = iterator {
+            // Iterator form: collection->indexOf(x | condition)
+            for (index, element) in collection.enumerated() {
+                context.pushScope()
+                context.setVariable(iterator, value: element)
+                let conditionResult = try await body.evaluate(in: context)
+                context.popScope()
+                if let boolResult = conditionResult as? Bool, boolResult {
+                    return index
+                }
+            }
+        } else {
+            // Direct form: collection->indexOf(element)
+            let searchValue = try await body.evaluate(in: context)
+            for (index, element) in collection.enumerated() {
+                if String(describing: element) == String(describing: searchValue as Any) {
+                    return index
+                }
+            }
+        }
+        return -1
     }
 }
