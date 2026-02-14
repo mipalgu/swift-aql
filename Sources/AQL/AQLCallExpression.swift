@@ -172,6 +172,16 @@ public struct AQLCallExpression: AQLExpression {
                 collection, method: method, arguments: arguments)
         }
 
+        // Boolean operations
+        if let boolVal = source as? Bool {
+            switch method {
+            case "not":
+                return !boolVal
+            default:
+                throw AQLExecutionError.invalidOperation("Unknown boolean operation: \(method)")
+            }
+        }
+
         // Standalone functions
         if source == nil {
             return try evaluateStandaloneFunction(method: method, arguments: arguments)
