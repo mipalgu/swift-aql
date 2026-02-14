@@ -121,15 +121,13 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameters:
     ///   - object: Source object
     ///   - property: Property name
-    /// - Returns: Navigation result
+    /// - Returns: Navigation result, or nil if source is nil or not an EObject
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
         guard let eObject = object as? (any EObject) else {
-            // If not an EObject, AQL might allow operations on primitives, but navigation usually implies EObject
-            // However, for collections, it might mean collect.
-            // For now, restrict to EObject
-            throw AQLExecutionError.typeError("Source is not an EObject")
+            // Return nil for nil sources or non-EObject sources (null-safe navigation)
+            return nil
         }
 
         return try await executionEngine.navigate(from: eObject, property: property)

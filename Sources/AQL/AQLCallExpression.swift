@@ -76,6 +76,12 @@ public struct AQLCallExpression: AQLExpression {
 
     @MainActor
     public func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
+        // Handle oclIsUndefined() early — check source for nil
+        if methodName == "oclIsUndefined" {
+            let sourceValue = try await source?.evaluate(in: context)
+            return sourceValue == nil
+        }
+
         // Handle OCL type operations specially — type arg is a name, not a value
         if methodName == "oclIsKindOf" || methodName == "oclIsTypeOf" || methodName == "oclAsType" {
             return try await evaluateOCLTypeOperation(in: context)
@@ -286,23 +292,23 @@ public struct AQLCallExpression: AQLExpression {
             return collection[index]
 
         case "indexOf":
-            guard let element = arguments.first else {
+            guard let element = arguments.first, let unwrappedElement = element else {
                 throw AQLExecutionError.typeError("indexOf requires an argument")
             }
             // Simple string-based comparison
             if let index = collection.firstIndex(where: {
-                String(describing: $0) == String(describing: element)
+                String(describing: $0) == String(describing: unwrappedElement)
             }) {
                 return index
             }
             return -1
 
         case "includes", "contains":
-            guard let element = arguments.first else {
+            guard let element = arguments.first, let unwrappedElement = element else {
                 throw AQLExecutionError.typeError("includes requires an argument")
             }
             return collection.contains(where: {
-                String(describing: $0) == String(describing: element)
+                String(describing: $0) == String(describing: unwrappedElement)
             })
 
         default:
