@@ -150,6 +150,25 @@ public final class AQLExecutionContext: Sendable {
         variables[name] = value
     }
 
+    /// Sets a variable in the outermost scope, visible from every scope.
+    ///
+    /// Any binding of the same name in an inner scope is removed, so that the new value is
+    /// the one every lookup finds, whether or not the caller is inside nested scopes. The
+    /// binding outlives the scopes that are active when it is set.
+    ///
+    /// - Parameters:
+    ///   - name: Variable name
+    ///   - value: Variable value
+    public func setGlobalVariable(_ name: String, value: (any EcoreValue)?) {
+        guard !scopeStack.isEmpty else {
+            variables[name] = value
+            return
+        }
+        scopeStack[0][name] = value
+        for index in scopeStack.indices.dropFirst() { scopeStack[index][name] = nil }
+        variables[name] = nil
+    }
+
     /// Get a variable value from the current scope or scope stack.
     ///
     /// - Parameter name: Variable name
