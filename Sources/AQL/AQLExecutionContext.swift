@@ -204,6 +204,11 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameters:
     ///   - object: Source object
     ///   - property: Property name
+    ///
+    /// Collections are navigated element by element and the results flattened. When a derived,
+    /// volatile or transient feature of an object has no value (nil or an empty collection), a
+    /// client-registered zero-argument service of the same name is called on the object instead,
+    /// so that templates can compute such features without writing parentheses.
     /// - Returns: Navigation result, or nil if source is nil or not an EObject
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
@@ -222,7 +227,30 @@ public final class AQLExecutionContext: Sendable {
             return nil
         }
 
-        return try await executionEngine.navigate(from: eObject, property: property)
+        let value = try await executionEngine.navigate(from: eObject, property: property)
+        guard Self.hasNoValue(value), Self.isComputed(property, of: eObject),
+            let service = services.find(
+                name: property, receiver: eObject, hasReceiver: true, argumentCount: 0,
+                customOnly: true)
+        else { return value }
+        return try await service.implementation(
+            AQLServiceCall(name: property, receiver: eObject, arguments: [], context: self))
+    }
+
+    private static func hasNoValue(_ value: (any EcoreValue)?) -> Bool {
+        guard let value else { return true }
+        return AQLValues.elements(of: value)?.isEmpty ?? false
+    }
+
+    private static func isComputed(_ property: String, of object: any EObject) -> Bool {
+        let feature = (object.eClass as? EClass)?.getStructuralFeature(name: property)
+        if let attribute = feature as? EAttribute {
+            return attribute.derived || attribute.volatile || attribute.transient
+        }
+        if let reference = feature as? EReference {
+            return reference.derived || reference.volatile || reference.transient
+        }
+        return false
     }
 }
 

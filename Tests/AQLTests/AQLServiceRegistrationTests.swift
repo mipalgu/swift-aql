@@ -212,4 +212,38 @@ struct AQLServiceRegistrationTests {
         #expect(throws: AQLExecutionError.self) { try call.type(0) }
         #expect(call.argument(7) == nil)
     }
+
+    @Test("Unset derived, volatile and transient features fall through to a zero-argument service")
+    func computedFeatureFallback() async throws {
+        struct Computing: AQLServiceProvider {
+            var services: [AQLService] {
+                ["computed", "volatileOne", "transientOne", "plain"].map { name in
+                    AQLService(name, receiver: .object) { _ in "service" }
+                }
+            }
+        }
+        var node = EClass(name: "N")
+        let string = EDataType(name: "EString")
+        node.eStructuralFeatures.append(EAttribute(name: "computed", eType: string, derived: true))
+        node.eStructuralFeatures.append(EAttribute(name: "volatileOne", eType: string, volatile: true))
+        node.eStructuralFeatures.append(EAttribute(name: "transientOne", eType: string, transient: true))
+        node.eStructuralFeatures.append(EAttribute(name: "plain", eType: string))
+        var object = DynamicEObject(eClass: node)
+        let context = AQLExecutionContext(
+            executionEngine: ECoreExecutionEngine(models: [:]), serviceProviders: [Computing()])
+        func navigate(_ property: String) async throws -> (any EcoreValue)? {
+            try await AQLNavigationExpression(source: lit(object), property: property).evaluate(in: context)
+        }
+        #expect(try await navigate("computed") as? String == "service")
+        #expect(try await navigate("volatileOne") as? String == "service")
+        #expect(try await navigate("transientOne") as? String == "service")
+        #expect(try await navigate("plain") == nil)
+
+        object.eSet("computed", value: "stored")
+        let withValue = AQLExecutionContext(
+            executionEngine: ECoreExecutionEngine(models: [:]), serviceProviders: [Computing()])
+        let stored = try await AQLNavigationExpression(source: lit(object), property: "computed")
+            .evaluate(in: withValue)
+        #expect(stored as? String == "stored")
+    }
 }
