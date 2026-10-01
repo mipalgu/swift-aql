@@ -47,13 +47,96 @@ public final class AQLExecutionContext: Sendable {
     /// Debug mode flag.
     public var debug: Bool = false
 
+    /// The services callable from expressions evaluated in this context.
+    ///
+    /// The registry starts with the standard library; use ``register(_:)`` to add services.
+    public private(set) var services: AQLServiceRegistry
+
+    /// The resources searched by services that need the whole model (`eContainer`, `allInstances`, ...).
+    public private(set) var resources: [Resource] = []
+
+    /// Whether `indexOf` on collections returns 1-based positions (0 if absent) as AQL specifies.
+    ///
+    /// The default (`false`) keeps the original behaviour of this package: 0-based positions, -1 if absent.
+    public var usesOneBasedIndexOf: Bool = false
+
+    /// Whether the child-to-parent containment index is cached between calls.
+    ///
+    /// Caching makes `eContainer()`, `ancestors()` and `siblings()` cheap on large models, but the
+    /// cache must be dropped with ``invalidateContainmentIndex()`` after the model changes.
+    public var cachesContainmentIndex: Bool = false
+
+    private var containmentIndex: [EUUID: (any EObject)]?
+
     // MARK: - Initialisation
 
     /// Creates a new AQL execution context.
     ///
-    /// - Parameter executionEngine: The ECore execution engine to delegate to.
-    public init(executionEngine: ECoreExecutionEngine) {
+    /// - Parameters:
+    ///   - executionEngine: The ECore execution engine to delegate to.
+    ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    public init(
+        executionEngine: ECoreExecutionEngine,
+        serviceProviders: [any AQLServiceProvider] = []
+    ) {
         self.executionEngine = executionEngine
+        var registry = AQLServiceRegistry()
+        for provider in serviceProviders { registry.register(provider) }
+        self.services = registry
+    }
+
+    // MARK: - Services
+
+    /// Registers a service provider.
+    ///
+    /// Services of the provider take precedence over earlier registrations and over
+    /// the standard library for calls with the same name, receiver kind and arity.
+    ///
+    /// - Parameter provider: The provider to register.
+    public func register(_ provider: some AQLServiceProvider) {
+        services.register(provider)
+    }
+
+    /// Adds a resource to the set searched by whole-model services.
+    ///
+    /// - Parameter resource: The resource holding model objects.
+    public func addResource(_ resource: Resource) {
+        if !resources.contains(where: { $0 === resource }) { resources.append(resource) }
+        containmentIndex = nil
+    }
+
+    /// Resolves an object identifier against the registered resources.
+    ///
+    /// - Parameter id: The object identifier.
+    /// - Returns: The object, or nil if no registered resource holds it.
+    func resolve(_ id: EUUID) async -> (any EObject)? {
+        for resource in resources {
+            if let object = await resource.resolve(id) { return object }
+        }
+        return nil
+    }
+
+    /// Drops the cached containment index (see ``cachesContainmentIndex``).
+    public func invalidateContainmentIndex() {
+        containmentIndex = nil
+    }
+
+    /// The parent object of every contained object, keyed by child identifier.
+    ///
+    /// - Returns: The parents of all objects reachable through containment references of the
+    ///   registered resources.
+    func parents() async throws -> [EUUID: any EObject] {
+        if cachesContainmentIndex, let containmentIndex { return containmentIndex }
+        var index: [EUUID: any EObject] = [:]
+        for resource in resources {
+            for object in await resource.getAllObjects() {
+                for child in try await AQLObjectServices.contents(of: object, in: self) {
+                    if let child = child as? any EObject { index[child.id] = object }
+                }
+            }
+        }
+        if cachesContainmentIndex { containmentIndex = index }
+        return index
     }
 
     // MARK: - Variable Management
@@ -125,6 +208,15 @@ public final class AQLExecutionContext: Sendable {
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
+        if let items = AQLValues.elements(of: object) {
+            var collected: [any EcoreValue] = []
+            for item in items {
+                if let value = try await navigate(from: item, property: property) {
+                    collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
+                }
+            }
+            return EcoreValueArray(collected)
+        }
         guard let eObject = object as? (any EObject) else {
             // Return nil for nil sources or non-EObject sources (null-safe navigation)
             return nil
