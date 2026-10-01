@@ -15,6 +15,31 @@ A pure Swift implementation of the Acceleo Query Language (AQL).
 - **EMF Integration**: Built on top of `swift-ecore` for seamless model querying
 - **Performance**: Optimized for fast model navigation and querying
 
+## Services
+
+Operations on strings, collections, numbers, booleans and model objects are
+provided as services. The standard library (Acceleo/AQL string, collection and
+EObject services) is available in every `AQLExecutionContext`, and clients add
+their own through `AQLServiceProvider`:
+
+```swift
+struct GreetingServices: AQLServiceProvider {
+    var services: [AQLService] {
+        [AQLService("greet", receiver: .string, arity: 1) { call in
+            "\(try call.string(0)), \(try call.receiverString())"
+        }]
+    }
+}
+
+context.register(GreetingServices())
+```
+
+Calls `receiver.name(args)`, `receiver->name(args)` and `name(args)` search the
+registered services (most recent first) and then the standard library. Services
+may be asynchronous and use `call.context` to navigate the model. Iterator
+arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
+(`ecore::EClass`) as `AQLTypeDescriptor` values.
+
 ## Requirements
 
 - Swift 6.0 or later
