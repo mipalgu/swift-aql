@@ -22,6 +22,18 @@ import Foundation
 /// `equalsIgnoreCase`, `contains`, `strcmp`, `strstr`, `first(n)`, `last(n)`, `at`, `characters`,
 /// `isAlpha`, `isAlphanum`, `trim`, `toInteger`, `toReal`, `toBoolean`, and
 /// `removeLineSeparators`.
+///
+/// `replace` and `replaceAll` take a regular expression; `substitute` (`substituteFirst`) and
+/// `substituteAll` treat their first argument and the replacement as literal text, so that
+/// characters such as `.` and `$` have no special meaning. `index` and `lastIndex` return -1 when
+/// the substring is absent.
+///
+/// The standard library has no services to split text into lines, join or indent text, or convert
+/// between characters and character codes or radix strings. The nearest standard equivalents are
+/// `tokenize` with a delimiter string (which drops empty tokens) for splitting, `sep` on
+/// collections for interleaving separators, `characters` for individual characters, and
+/// `toString` for any value. Such helpers belong in the service set of the template library that
+/// needs them.
 public struct AQLStringServices: AQLServiceProvider {
     /// Creates the provider.
     public init() {}
