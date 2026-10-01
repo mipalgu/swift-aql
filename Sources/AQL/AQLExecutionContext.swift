@@ -55,10 +55,11 @@ public final class AQLExecutionContext: Sendable {
     /// The resources searched by services that need the whole model (`eContainer`, `allInstances`, ...).
     public private(set) var resources: [Resource] = []
 
-    /// Whether `indexOf` on collections returns 1-based positions (0 if absent) as AQL specifies.
+    /// Whether `indexOf` and `lastIndexOf` on collections return 1-based positions (0 if absent) as AQL specifies.
     ///
-    /// The default (`false`) keeps the original behaviour of this package: 0-based positions, -1 if absent.
-    public var usesOneBasedIndexOf: Bool = false
+    /// The default (`true`) follows the AQL specification. Set it to `false` to get the earlier
+    /// behaviour of this package: 0-based positions, -1 if absent.
+    public var usesOneBasedIndexOf: Bool = true
 
     /// Whether the child-to-parent containment index is cached between calls.
     ///

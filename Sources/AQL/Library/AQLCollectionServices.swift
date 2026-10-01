@@ -13,9 +13,9 @@ import Foundation
 ///
 /// The `.` and `->` call forms reach the same implementations. Collections are held as
 /// `EcoreValueArray`; sets are ordered and duplicate free (see `asSet`, `union`).
-/// Positions are 1-based as in AQL (`at`, `insertAt`, `subSequence`, `subOrderedSet`), with the
-/// exception of `indexOf` and `lastIndexOf`, which are 0-based (-1 if absent) unless
-/// ``AQLExecutionContext/usesOneBasedIndexOf`` is set.
+/// Positions are 1-based as in AQL (`at`, `insertAt`, `subSequence`, `subOrderedSet`, `indexOf`,
+/// `lastIndexOf`); `indexOf` and `lastIndexOf` return 0 when the element is absent. Clearing
+/// ``AQLExecutionContext/usesOneBasedIndexOf`` makes those two 0-based (-1 if absent) instead.
 ///
 /// Queries: `size`, `isEmpty`, `notEmpty`, `first`, `last`, `at`, `indexOf`, `lastIndexOf`,
 /// `includes` (`contains`), `excludes`, `includesAll`, `excludesAll`, `count`, `sum`, `min`, `max`,

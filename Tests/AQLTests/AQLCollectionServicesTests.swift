@@ -195,6 +195,26 @@ struct AQLCollectionServicesTests {
         #expect(absent as? Int == 0)
     }
 
+    @Test func indexOfIsOneBasedByDefault() async throws {
+        let context = makeContext()
+        #expect(context.usesOneBasedIndexOf)
+        let found = try await evaluate(LibraryCase(seq(1, 2, 3, 4), "indexOf", 3, expect: nil), in: context)
+        let absent = try await evaluate(LibraryCase(seq(1, 2), "indexOf", 9, expect: nil), in: context)
+        let last = try await evaluate(LibraryCase(seq(1, 2, 1), "lastIndexOf", 1, expect: nil), in: context)
+        #expect(found as? Int == 3)
+        #expect(absent as? Int == 0)
+        #expect(last as? Int == 3)
+    }
+
+    @Test func zeroBasedIndexOfRemainsAvailable() async throws {
+        let context = makeContext()
+        context.usesOneBasedIndexOf = false
+        let found = try await evaluate(LibraryCase(seq(1, 2, 3, 4), "indexOf", 3, expect: nil), in: context)
+        let absent = try await evaluate(LibraryCase(seq(1, 2), "indexOf", 9, expect: nil), in: context)
+        #expect(found as? Int == 2)
+        #expect(absent as? Int == -1)
+    }
+
     @Test func collectionExpressionDelegates() async throws {
         let expr = AQLCollectionExpression(
             source: lit(numbers), operation: .select, iterator: "x", body: isEven.body)

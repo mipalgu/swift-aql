@@ -38,8 +38,8 @@ import Foundation
 /// - `last()` - Last element or null
 ///
 /// ### Element Lookup
-/// - `indexOf(element)` - 0-based index of first matching element, or -1 if not found
-///   (1-based, 0 if absent, when ``AQLExecutionContext/usesOneBasedIndexOf`` is set)
+/// - `indexOf(element)` - 1-based index of first matching element, or 0 if not found
+///   (0-based, -1 if absent, when ``AQLExecutionContext/usesOneBasedIndexOf`` is cleared)
 ///
 /// ### Iteration
 /// - `sortedBy(iterator | key)`, `one(iterator | condition)`, `isUnique(iterator | key)`,
@@ -160,7 +160,7 @@ public struct AQLCollectionExpression: AQLExpression {
             case .size: return 0
             case .isEmpty: return true
             case .notEmpty: return false
-            case .indexOf: return -1
+            case .indexOf: return context.usesOneBasedIndexOf ? 0 : -1
             default: return nil
             }
         }
