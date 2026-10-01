@@ -280,7 +280,7 @@ struct AQLTests {
 
         let result = try await expr.evaluate(in: context)
 
-        #expect(result as? Int == 1)
+        #expect(result as? Int == 2)
     }
 
     // MARK: - Binary Operations

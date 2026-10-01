@@ -27,9 +27,9 @@ struct AQLCollectionServicesTests {
         LibraryCase(abc, "at", 2, expect: "b"),
         LibraryCase(abc, "at", 0, expect: nil),
         LibraryCase(abc, "at", 4, expect: nil),
-        LibraryCase(abc, "indexOf", "b", expect: 1),
-        LibraryCase(abc, "indexOf", "z", expect: -1),
-        LibraryCase(seq(1, 2, 3, 4, 3), "lastIndexOf", 3, expect: 4),
+        LibraryCase(abc, "indexOf", "b", expect: 2),
+        LibraryCase(abc, "indexOf", "z", expect: 0),
+        LibraryCase(seq(1, 2, 3, 4, 3), "lastIndexOf", 3, expect: 5),
         LibraryCase(abc, "includes", "a", expect: true),
         LibraryCase(abc, "includes", "z", expect: false),
         LibraryCase(abc, "contains", "c", expect: true),
@@ -183,7 +183,7 @@ struct AQLCollectionServicesTests {
     }
 
     @Test func indexOfWithLambda() async throws {
-        #expect(try await call("indexOf", on: numbers, isEven) as? Int == 1)
+        #expect(try await call("indexOf", on: numbers, isEven) as? Int == 2)
     }
 
     @Test func oneBasedIndexOf() async throws {
