@@ -26,9 +26,9 @@ import Foundation
 /// - `collect(iterator | expression)` - Transform each element
 ///
 /// ### Querying
-/// - `any(iterator | condition)` - True if any element matches
+/// - `any(iterator | condition)` - The first element matching the condition, or null
 /// - `forAll(iterator | condition)` - True if all elements match
-/// - `exists(iterator | condition)` - True if any element matches (alias for any)
+/// - `exists(iterator | condition)` - True if any element matches
 ///
 /// ### Properties
 /// - `size()` - Number of elements
@@ -39,6 +39,11 @@ import Foundation
 ///
 /// ### Element Lookup
 /// - `indexOf(element)` - 0-based index of first matching element, or -1 if not found
+///   (1-based, 0 if absent, when ``AQLExecutionContext/usesOneBasedIndexOf`` is set)
+///
+/// ### Iteration
+/// - `sortedBy(iterator | key)`, `one(iterator | condition)`, `isUnique(iterator | key)`,
+///   `closure(iterator | next)`
 ///
 /// ## Example Usage
 ///
@@ -92,6 +97,12 @@ public struct AQLCollectionExpression: AQLExpression {
 
         // Element lookup
         case indexOf
+
+        // Iteration
+        case sortedBy
+        case one
+        case isUnique
+        case closure
     }
 
     // MARK: - Properties
@@ -135,284 +146,36 @@ public struct AQLCollectionExpression: AQLExpression {
 
     // MARK: - Evaluation
 
+    /// Evaluates the operation by calling the collection service of the same name.
+    ///
+    /// A null source yields the neutral result of the operation (0, true, false, null or -1).
+    /// Operations with an iterator pass an ``AQLLambda`` built from ``iterator`` and ``body``;
+    /// without an iterator, ``body`` is passed as an ordinary argument.
     @MainActor
     public func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
-        // Evaluate source
         let sourceValue = try await source.evaluate(in: context)
 
-        // Handle null source
-        guard let sourceValue = sourceValue else {
-            // Most operations on null return null or empty
+        guard sourceValue != nil else {
             switch operation {
-            case .size:
-                return 0
-            case .isEmpty:
-                return true
-            case .notEmpty:
-                return false
-            case .first, .last:
-                return nil
-            case .indexOf:
-                return -1
-            default:
-                return nil  // Empty collection result
+            case .size: return 0
+            case .isEmpty: return true
+            case .notEmpty: return false
+            case .indexOf: return -1
+            default: return nil
             }
         }
 
-        // Convert to collection
-        let collection: [any EcoreValue]
-        if let valueArray = sourceValue as? EcoreValueArray {
-            // Unwrap EcoreValueArray to get the underlying values
-            collection = valueArray.values
-        } else if let array = sourceValue as? [any EcoreValue] {
-            collection = array
-        } else {
-            // Single element becomes single-element collection
-            collection = [sourceValue]
-        }
-
-        // Execute operation
-        switch operation {
-        case .select:
-            let result = try await select(collection, context: context)
-            return EcoreValueArray(result)
-        case .reject:
-            let result = try await reject(collection, context: context)
-            return EcoreValueArray(result)
-        case .collect:
-            let result = try await collect(collection, context: context)
-            return EcoreValueArray(result)
-        case .any, .exists:
-            return try await any(collection, context: context)
-        case .forAll:
-            return try await forAll(collection, context: context)
-        case .size:
-            return collection.count
-        case .isEmpty:
-            return collection.isEmpty
-        case .notEmpty:
-            return !collection.isEmpty
-        case .first:
-            return collection.first
-        case .last:
-            return collection.last
-        case .indexOf:
-            return try await indexOf(collection, context: context)
-        }
-    }
-
-    // MARK: - Operation Implementations
-
-    /// Filters collection to elements matching the condition.
-    @MainActor
-    private func select(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> [any EcoreValue] {
-        guard let iterator = iterator, let body = body else {
-            throw AQLExecutionError.invalidOperation("select requires iterator and body")
-        }
-
-        var result: [any EcoreValue] = []
-
-        for element in collection {
-            // Push scope and bind iterator
-            context.pushScope()
-            context.setVariable(iterator, value: element)
-
-            // Evaluate condition
-            let conditionResult = try await body.evaluate(in: context)
-
-            // Pop scope
-            context.popScope()
-
-            // Add if condition is true
-            if let boolResult = conditionResult as? Bool, boolResult {
-                result.append(element)
-            }
-        }
-
-        return result
-    }
-
-    /// Filters collection to elements not matching the condition.
-    @MainActor
-    private func reject(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> [any EcoreValue] {
-        guard let iterator = iterator, let body = body else {
-            throw AQLExecutionError.invalidOperation("reject requires iterator and body")
-        }
-
-        var result: [any EcoreValue] = []
-
-        for element in collection {
-            // Push scope and bind iterator
-            context.pushScope()
-            context.setVariable(iterator, value: element)
-
-            // Evaluate condition
-            let conditionResult = try await body.evaluate(in: context)
-
-            // Pop scope
-            context.popScope()
-
-            // Add if condition is false or not boolean
-            if let boolResult = conditionResult as? Bool, !boolResult {
-                result.append(element)
-            } else if conditionResult == nil {
-                result.append(element)
-            }
-        }
-
-        return result
-    }
-
-    /// Transforms each element using the body expression.
-    @MainActor
-    private func collect(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> [any EcoreValue] {
-        guard let iterator = iterator, let body = body else {
-            throw AQLExecutionError.invalidOperation("collect requires iterator and body")
-        }
-
-        var result: [any EcoreValue] = []
-
-        for element in collection {
-            // Push scope and bind iterator
-            context.pushScope()
-            context.setVariable(iterator, value: element)
-
-            // Evaluate transformation
-            let transformedValue = try await body.evaluate(in: context)
-
-            // Pop scope
-            context.popScope()
-
-            // Add transformed value (even if null)
-            if let transformedValue = transformedValue {
-                result.append(transformedValue)
-            }
-        }
-
-        return result
-    }
-
-    /// Returns true if any element matches the condition.
-    @MainActor
-    private func any(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> Bool {
-        guard let iterator = iterator, let body = body else {
-            throw AQLExecutionError.invalidOperation("any requires iterator and body")
-        }
-
-        for element in collection {
-            // Push scope and bind iterator
-            context.pushScope()
-            context.setVariable(iterator, value: element)
-
-            // Evaluate condition
-            let conditionResult = try await body.evaluate(in: context)
-
-            // Pop scope
-            context.popScope()
-
-            // Return true if condition is true
-            if let boolResult = conditionResult as? Bool, boolResult {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    /// Returns true if all elements match the condition.
-    @MainActor
-    private func forAll(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> Bool {
-        guard let iterator = iterator, let body = body else {
-            throw AQLExecutionError.invalidOperation("forAll requires iterator and body")
-        }
-
-        for element in collection {
-            // Push scope and bind iterator
-            context.pushScope()
-            context.setVariable(iterator, value: element)
-
-            // Evaluate condition
-            let conditionResult = try await body.evaluate(in: context)
-
-            // Pop scope
-            context.popScope()
-
-            // Return false if condition is false or not boolean
-            if let boolResult = conditionResult as? Bool {
-                if !boolResult {
-                    return false
-                }
+        var argument: [any AQLExpression] = []
+        if let body {
+            if let iterator {
+                argument = [AQLLambdaExpression(iterator: iterator, body: body)]
             } else {
-                // Non-boolean or null is treated as false
-                return false
+                argument = [body]
             }
         }
-
-        return true
-    }
-
-    /// Returns the (0-based) index of the first element matching the body expression.
-    ///
-    /// When used with an iterator (`collection->indexOf(x | condition)`), it returns
-    /// the index of the first element where the condition is true. When used without
-    /// an iterator (`collection->indexOf(element)`), it returns the index of the first
-    /// element that is equal to the given element.
-    ///
-    /// - Parameters:
-    ///   - collection: The collection to search.
-    ///   - context: The AQL execution context.
-    /// - Returns: The 0-based index of the first matching element, or -1 if not found.
-    @MainActor
-    private func indexOf(
-        _ collection: [any EcoreValue],
-        context: AQLExecutionContext
-    ) async throws -> Int {
-        guard let body = body else {
-            throw AQLExecutionError.invalidOperation("indexOf requires an argument")
-        }
-
-        if let iterator = iterator {
-            // Iterator form: collection->indexOf(x | condition)
-            for (index, element) in collection.enumerated() {
-                context.pushScope()
-                context.setVariable(iterator, value: element)
-                let conditionResult = try await body.evaluate(in: context)
-                context.popScope()
-                if let boolResult = conditionResult as? Bool, boolResult {
-                    return index
-                }
-            }
-        } else {
-            // Direct form: collection->indexOf(element)
-            let searchValue = try await body.evaluate(in: context)
-            for (index, element) in collection.enumerated() {
-                // Compare by EObject identity (UUID) if both are EObjects,
-                // otherwise fall back to string comparison
-                if let eObjA = element as? (any EObject),
-                   let eObjB = searchValue as? (any EObject) {
-                    if eObjA.id == eObjB.id {
-                        return index
-                    }
-                } else if String(describing: element) == String(describing: searchValue as Any) {
-                    return index
-                }
-            }
-        }
-        return -1
+        return try await AQLCallExpression(
+            source: AQLLiteralExpression(value: sourceValue), methodName: operation.rawValue,
+            arguments: argument, usesArrow: true
+        ).evaluate(in: context)
     }
 }

@@ -38,9 +38,19 @@ import Foundation
 /// )
 /// ```
 ///
-/// ## Standard Library
+/// ## Dispatch
 ///
-/// AQL provides standard operations on primitives and collections following OCL semantics.
+/// A call `receiver.name(args)` (or `receiver->name(args)` when ``usesArrow`` is set) looks up a
+/// service by name, receiver kind and argument count: first among the services registered on the
+/// execution context (latest registration first), then in the standard library. A call without a
+/// receiver first looks for a standalone service and otherwise treats its first argument as the
+/// receiver, so `min(a, b)` and `a.min(b)` are equivalent. When no service matches and the receiver
+/// is an object, a zero-argument call falls back to navigating the structural feature of that name.
+///
+/// ## Iterator arguments
+///
+/// Operations such as `select` take an ``AQLLambdaExpression`` argument. Arguments of services that
+/// accept type arguments may be bare identifiers or ``AQLTypeLiteralExpression`` nodes.
 public struct AQLCallExpression: AQLExpression {
 
     // MARK: - Properties
@@ -54,6 +64,12 @@ public struct AQLCallExpression: AQLExpression {
     /// Argument expressions passed to the method.
     public let arguments: [any AQLExpression]
 
+    /// Whether the call was written with `->`.
+    ///
+    /// The receiver of an arrow call is coerced to a collection: null becomes an empty collection
+    /// and any other non-collection value becomes a single-element collection.
+    public let usesArrow: Bool
+
     // MARK: - Initialisation
 
     /// Creates a method call expression.
@@ -62,311 +78,91 @@ public struct AQLCallExpression: AQLExpression {
     ///   - source: Optional source object (nil for standalone functions)
     ///   - methodName: The method name
     ///   - arguments: The argument expressions
+    ///   - usesArrow: Whether the call was written with `->`
     public init(
         source: (any AQLExpression)? = nil,
         methodName: String,
-        arguments: [any AQLExpression] = []
+        arguments: [any AQLExpression] = [],
+        usesArrow: Bool = false
     ) {
         self.source = source
         self.methodName = methodName
         self.arguments = arguments
+        self.usesArrow = usesArrow
     }
 
     // MARK: - Evaluation
 
     @MainActor
     public func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
-        // Handle oclIsUndefined() early — check source for nil
-        if methodName == "oclIsUndefined" {
-            let sourceValue = try await source?.evaluate(in: context)
-            return sourceValue == nil
+        var receiver = try await source?.evaluate(in: context)
+        var hasReceiver = source != nil
+        var argumentExpressions = arguments
+
+        if hasReceiver && usesArrow {
+            receiver = AQLValues.collection(AQLValues.coerceToCollection(receiver))
         }
 
-        // Handle OCL type operations specially — type arg is a name, not a value
-        if methodName == "oclIsKindOf" || methodName == "oclIsTypeOf" || methodName == "oclAsType" {
-            return try await evaluateOCLTypeOperation(in: context)
-        }
-
-        // Evaluate source if present
-        let sourceValue = try await source?.evaluate(in: context)
-
-        // Evaluate arguments
-        var argumentValues: [(any EcoreValue)?] = []
-        for argExpr in arguments {
-            let argValue = try await argExpr.evaluate(in: context)
-            argumentValues.append(argValue)
-        }
-
-        // Try standard library operations first
-        if let result = try? evaluateStandardLibrary(
-            source: sourceValue, method: methodName, arguments: argumentValues)
+        if !hasReceiver,
+            context.services.find(
+                name: methodName, receiver: nil, hasReceiver: false,
+                argumentCount: argumentExpressions.count) == nil,
+            let first = argumentExpressions.first
         {
-            return result
+            receiver = try await first.evaluate(in: context)
+            argumentExpressions.removeFirst()
+            hasReceiver = true
         }
 
-        // If source is an EObject, try invoking operation through execution engine
-        if sourceValue is (any EObject) {
+        guard
+            let service = context.services.find(
+                name: methodName, receiver: receiver, hasReceiver: hasReceiver,
+                argumentCount: argumentExpressions.count)
+        else {
+            return try await fallback(receiver: receiver, argumentCount: argumentExpressions.count, in: context)
+        }
+
+        var argumentValues: [(any EcoreValue)?] = []
+        for expression in argumentExpressions {
+            if service.acceptsTypeArguments, let type = try await typeArgument(expression, in: context) {
+                argumentValues.append(type)
+            } else {
+                argumentValues.append(try await expression.evaluate(in: context))
+            }
+        }
+
+        return try await service.implementation(
+            AQLServiceCall(
+                name: methodName, receiver: receiver, arguments: argumentValues, context: context))
+    }
+
+    /// Resolves an argument written as a bare identifier to a type descriptor.
+    @MainActor
+    private func typeArgument(_ expression: any AQLExpression, in context: AQLExecutionContext)
+        async throws -> (any EcoreValue)?
+    {
+        guard let variable = expression as? AQLVariableExpression else { return nil }
+        if let bound = try? await context.getVariable(variable.name),
+            AQLTypeDescriptor(value: bound) != nil
+        {
+            return bound
+        }
+        return AQLTypeDescriptor(qualifiedName: variable.name)
+    }
+
+    /// Handles calls for which no service exists.
+    @MainActor
+    private func fallback(
+        receiver: (any EcoreValue)?, argumentCount: Int, in context: AQLExecutionContext
+    ) async throws -> (any EcoreValue)? {
+        if receiver is any EObject {
+            if argumentCount == 0, let value = try? await context.navigate(from: receiver, property: methodName) {
+                return value
+            }
             // TODO: Delegate to execution engine for EOperation invocation
             throw AQLExecutionError.invalidOperation(
                 "EOperation invocation not yet implemented for '\(methodName)'")
         }
-
         throw AQLExecutionError.invalidOperation("Unknown method: \(methodName)")
-    }
-
-    // MARK: - OCL Type Operations
-
-    /// Evaluates OCL type operations (oclIsKindOf, oclIsTypeOf, oclAsType).
-    ///
-    /// These operations require special handling because the type argument is a type name literal,
-    /// not a runtime value. The type argument arrives as an `AQLVariableExpression` with the type name.
-    private func evaluateOCLTypeOperation(in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
-        let sourceValue = try await source?.evaluate(in: context)
-
-        // Extract type name from the first argument expression
-        guard let firstArg = arguments.first,
-              let varExpr = firstArg as? AQLVariableExpression else {
-            throw AQLExecutionError.invalidOperation(
-                "\(methodName) requires a type name argument")
-        }
-        let typeName = varExpr.name
-
-        guard let eobj = sourceValue as? DynamicEObject else {
-            // Non-EObject: fall back to Swift type name comparison
-            if let sv = sourceValue {
-                let swiftTypeName = String(describing: Swift.type(of: sv))
-                switch methodName {
-                case "oclIsTypeOf": return swiftTypeName == typeName
-                case "oclIsKindOf": return swiftTypeName == typeName
-                case "oclAsType": return sourceValue
-                default: return false
-                }
-            }
-            return false
-        }
-
-        switch methodName {
-        case "oclIsTypeOf":
-            return eobj.eClass.name == typeName
-        case "oclIsKindOf":
-            return eobj.eClass.name == typeName
-                || eobj.eClass.allSuperTypes.contains { $0.name == typeName }
-        case "oclAsType":
-            // Dynamic objects: casting is a no-op, the object already has all features
-            return sourceValue
-        default:
-            throw AQLExecutionError.invalidOperation("Unknown OCL type operation: \(methodName)")
-        }
-    }
-
-    // MARK: - Standard Library
-
-    /// Evaluates standard library operations.
-    private func evaluateStandardLibrary(
-        source: (any EcoreValue)?,
-        method: String,
-        arguments: [(any EcoreValue)?]
-    ) throws -> (any EcoreValue)? {
-        // String operations
-        if let str = source as? String {
-            return try evaluateStringOperation(str, method: method, arguments: arguments)
-        }
-
-        // Collection operations (some are also available as methods)
-        if let collection = source as? [any EcoreValue] {
-            return try evaluateCollectionOperation(
-                collection, method: method, arguments: arguments)
-        }
-
-        // Boolean operations
-        if let boolVal = source as? Bool {
-            switch method {
-            case "not":
-                return !boolVal
-            default:
-                throw AQLExecutionError.invalidOperation("Unknown boolean operation: \(method)")
-            }
-        }
-
-        // Standalone functions
-        if source == nil {
-            return try evaluateStandaloneFunction(method: method, arguments: arguments)
-        }
-
-        throw AQLExecutionError.invalidOperation("No standard library operation found")
-    }
-
-    // MARK: - String Operations
-
-    private func evaluateStringOperation(
-        _ str: String,
-        method: String,
-        arguments: [(any EcoreValue)?]
-    ) throws -> (any EcoreValue)? {
-        switch method {
-        case "size", "length":
-            return str.count
-
-        case "toUpperCase", "upper":
-            return str.uppercased()
-
-        case "toLowerCase", "lower":
-            return str.lowercased()
-
-        case "substring":
-            guard arguments.count >= 2,
-                let start = arguments[0] as? Int,
-                let end = arguments[1] as? Int
-            else {
-                throw AQLExecutionError.typeError("substring requires two integer arguments")
-            }
-            let startIndex = str.index(str.startIndex, offsetBy: start)
-            let endIndex = str.index(str.startIndex, offsetBy: end)
-            return String(str[startIndex..<endIndex])
-
-        case "startsWith":
-            guard let prefix = arguments.first as? String else {
-                throw AQLExecutionError.typeError("startsWith requires string argument")
-            }
-            return str.hasPrefix(prefix)
-
-        case "endsWith":
-            guard let suffix = arguments.first as? String else {
-                throw AQLExecutionError.typeError("endsWith requires string argument")
-            }
-            return str.hasSuffix(suffix)
-
-        case "contains":
-            guard let substring = arguments.first as? String else {
-                throw AQLExecutionError.typeError("contains requires string argument")
-            }
-            return str.contains(substring)
-
-        case "trim":
-            return str.trimmingCharacters(in: .whitespaces)
-
-        case "replace":
-            guard arguments.count >= 2,
-                let target = arguments[0] as? String,
-                let replacement = arguments[1] as? String
-            else {
-                throw AQLExecutionError.typeError("replace requires two string arguments")
-            }
-            return str.replacingOccurrences(of: target, with: replacement)
-
-        default:
-            throw AQLExecutionError.invalidOperation("Unknown string operation: \(method)")
-        }
-    }
-
-    // MARK: - Collection Operations
-
-    private func evaluateCollectionOperation(
-        _ collection: [any EcoreValue],
-        method: String,
-        arguments: [(any EcoreValue)?]
-    ) throws -> (any EcoreValue)? {
-        switch method {
-        case "size":
-            return collection.count
-
-        case "isEmpty":
-            return collection.isEmpty
-
-        case "notEmpty":
-            return !collection.isEmpty
-
-        case "first":
-            return collection.first
-
-        case "last":
-            return collection.last
-
-        case "at":
-            guard let index = arguments.first as? Int else {
-                throw AQLExecutionError.typeError("at requires integer argument")
-            }
-            guard index >= 0 && index < collection.count else {
-                return nil
-            }
-            return collection[index]
-
-        case "indexOf":
-            guard let element = arguments.first, let unwrappedElement = element else {
-                throw AQLExecutionError.typeError("indexOf requires an argument")
-            }
-            // Simple string-based comparison
-            if let index = collection.firstIndex(where: {
-                String(describing: $0) == String(describing: unwrappedElement)
-            }) {
-                return index
-            }
-            return -1
-
-        case "includes", "contains":
-            guard let element = arguments.first, let unwrappedElement = element else {
-                throw AQLExecutionError.typeError("includes requires an argument")
-            }
-            return collection.contains(where: {
-                String(describing: $0) == String(describing: unwrappedElement)
-            })
-
-        default:
-            throw AQLExecutionError.invalidOperation("Unknown collection operation: \(method)")
-        }
-    }
-
-    // MARK: - Standalone Functions
-
-    private func evaluateStandaloneFunction(
-        method: String,
-        arguments: [(any EcoreValue)?]
-    ) throws -> (any EcoreValue)? {
-        switch method {
-        case "min":
-            guard arguments.count == 2 else {
-                throw AQLExecutionError.typeError("min requires exactly 2 arguments")
-            }
-            if let left = arguments[0] as? Int, let right = arguments[1] as? Int {
-                return Swift.min(left, right)
-            }
-            if let left = arguments[0] as? Double, let right = arguments[1] as? Double {
-                return Swift.min(left, right)
-            }
-            throw AQLExecutionError.typeError("min requires numeric arguments")
-
-        case "max":
-            guard arguments.count == 2 else {
-                throw AQLExecutionError.typeError("max requires exactly 2 arguments")
-            }
-            if let left = arguments[0] as? Int, let right = arguments[1] as? Int {
-                return Swift.max(left, right)
-            }
-            if let left = arguments[0] as? Double, let right = arguments[1] as? Double {
-                return Swift.max(left, right)
-            }
-            throw AQLExecutionError.typeError("max requires numeric arguments")
-
-        case "abs":
-            guard let value = arguments.first else {
-                throw AQLExecutionError.typeError("abs requires an argument")
-            }
-            if let intValue = value as? Int {
-                return abs(intValue)
-            }
-            if let doubleValue = value as? Double {
-                return abs(doubleValue)
-            }
-            throw AQLExecutionError.typeError("abs requires numeric argument")
-
-        case "toString":
-            guard let value = arguments.first else {
-                return "null"
-            }
-            return String(describing: value)
-
-        default:
-            throw AQLExecutionError.invalidOperation("Unknown function: \(method)")
-        }
     }
 }

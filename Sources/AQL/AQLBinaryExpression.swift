@@ -18,7 +18,7 @@ import Foundation
 /// ## Supported Operators
 ///
 /// ### Arithmetic
-/// - `+` (add), `-` (subtract), `*` (multiply), `/` (divide), `mod` (modulo)
+/// - `+` (add), `-` (subtract), `*` (multiply), `/` (divide), `mod` (modulo), `div` (integer division)
 ///
 /// ### Comparison
 /// - `=` (equals), `<>` (notEquals)
@@ -66,6 +66,7 @@ public struct AQLBinaryExpression: AQLExpression {
         case multiply = "*"
         case divide = "/"
         case mod = "mod"
+        case div = "div"
 
         // Comparison
         case equals = "="
@@ -267,9 +268,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return false
         }
 
-        // Compare values
-        // Use String representation as a fallback comparison
-        return String(describing: left!) == String(describing: right!)
+        return AQLValues.areEqual(left, right)
     }
 
     // MARK: - Non-Null Operations
@@ -289,6 +288,8 @@ public struct AQLBinaryExpression: AQLExpression {
             return try evaluateDivide(left, right)
         case .mod:
             return try evaluateMod(left, right)
+        case .div:
+            return try evaluateDiv(left, right)
         case .lessThan:
             return try evaluateLessThan(left, right)
         case .greaterThan:
@@ -387,6 +388,20 @@ public struct AQLBinaryExpression: AQLExpression {
 
         throw AQLExecutionError.typeError(
             "Cannot perform modulo on \(type(of: left)) and \(type(of: right))")
+    }
+
+    private func evaluateDiv(_ left: any EcoreValue, _ right: any EcoreValue) throws -> (
+        any EcoreValue
+    ) {
+        if let leftInt = AQLValues.integer(left), let rightInt = AQLValues.integer(right) {
+            guard rightInt != 0 else {
+                throw AQLExecutionError.invalidOperation("Division by zero")
+            }
+            return leftInt / rightInt
+        }
+
+        throw AQLExecutionError.typeError(
+            "Cannot perform integer division on \(type(of: left)) and \(type(of: right))")
     }
 
     // MARK: - Comparison Operations

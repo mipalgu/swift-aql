@@ -70,7 +70,20 @@ public struct AQLNavigationExpression: AQLExpression {
             }
         }
 
-        return try await context.navigate(from: sourceValue, property: property)
+        do {
+            return try await context.navigate(from: sourceValue, property: property)
+        } catch {
+            // Fall back to a zero-argument service registered by the client.
+            if let service = context.services.find(
+                name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
+                customOnly: true)
+            {
+                return try await service.implementation(
+                    AQLServiceCall(
+                        name: property, receiver: sourceValue, arguments: [], context: context))
+            }
+            throw error
+        }
     }
 }
 
