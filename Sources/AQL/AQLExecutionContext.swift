@@ -55,10 +55,11 @@ public final class AQLExecutionContext: Sendable {
     /// The resources searched by services that need the whole model (`eContainer`, `allInstances`, ...).
     public private(set) var resources: [Resource] = []
 
-    /// Whether `indexOf` on collections returns 1-based positions (0 if absent) as AQL specifies.
+    /// Whether `indexOf` and `lastIndexOf` on collections return 1-based positions (0 if absent) as AQL specifies.
     ///
-    /// The default (`false`) keeps the original behaviour of this package: 0-based positions, -1 if absent.
-    public var usesOneBasedIndexOf: Bool = false
+    /// The default (`true`) follows the AQL specification. Set it to `false` to get the earlier
+    /// behaviour of this package: 0-based positions, -1 if absent.
+    public var usesOneBasedIndexOf: Bool = true
 
     /// Whether the child-to-parent containment index is cached between calls.
     ///
@@ -150,6 +151,25 @@ public final class AQLExecutionContext: Sendable {
         variables[name] = value
     }
 
+    /// Sets a variable in the outermost scope, visible from every scope.
+    ///
+    /// Any binding of the same name in an inner scope is removed, so that the new value is
+    /// the one every lookup finds, whether or not the caller is inside nested scopes. The
+    /// binding outlives the scopes that are active when it is set.
+    ///
+    /// - Parameters:
+    ///   - name: Variable name
+    ///   - value: Variable value
+    public func setGlobalVariable(_ name: String, value: (any EcoreValue)?) {
+        guard !scopeStack.isEmpty else {
+            variables[name] = value
+            return
+        }
+        scopeStack[0][name] = value
+        for index in scopeStack.indices.dropFirst() { scopeStack[index][name] = nil }
+        variables[name] = nil
+    }
+
     /// Get a variable value from the current scope or scope stack.
     ///
     /// - Parameter name: Variable name
@@ -204,6 +224,11 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameters:
     ///   - object: Source object
     ///   - property: Property name
+    ///
+    /// Collections are navigated element by element and the results flattened. When a derived,
+    /// volatile or transient feature of an object has no value (nil or an empty collection), a
+    /// client-registered zero-argument service of the same name is called on the object instead,
+    /// so that templates can compute such features without writing parentheses.
     /// - Returns: Navigation result, or nil if source is nil or not an EObject
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
@@ -222,7 +247,30 @@ public final class AQLExecutionContext: Sendable {
             return nil
         }
 
-        return try await executionEngine.navigate(from: eObject, property: property)
+        let value = try await executionEngine.navigate(from: eObject, property: property)
+        guard Self.hasNoValue(value), Self.isComputed(property, of: eObject),
+            let service = services.find(
+                name: property, receiver: eObject, hasReceiver: true, argumentCount: 0,
+                customOnly: true)
+        else { return value }
+        return try await service.implementation(
+            AQLServiceCall(name: property, receiver: eObject, arguments: [], context: self))
+    }
+
+    private static func hasNoValue(_ value: (any EcoreValue)?) -> Bool {
+        guard let value else { return true }
+        return AQLValues.elements(of: value)?.isEmpty ?? false
+    }
+
+    private static func isComputed(_ property: String, of object: any EObject) -> Bool {
+        let feature = (object.eClass as? EClass)?.getStructuralFeature(name: property)
+        if let attribute = feature as? EAttribute {
+            return attribute.derived || attribute.volatile || attribute.transient
+        }
+        if let reference = feature as? EReference {
+            return reference.derived || reference.volatile || reference.transient
+        }
+        return false
     }
 }
 

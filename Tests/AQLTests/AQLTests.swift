@@ -280,7 +280,7 @@ struct AQLTests {
 
         let result = try await expr.evaluate(in: context)
 
-        #expect(result as? Int == 1)
+        #expect(result as? Int == 2)
     }
 
     // MARK: - Binary Operations
@@ -498,5 +498,22 @@ struct AQLTests {
         let result = try await expr.evaluate(in: context)
 
         #expect(result as? Bool == false)
+    }
+
+    @Test func globalVariablesSurviveScopesAndOverrideShadows() async throws {
+        let context = AQLExecutionContext(executionEngine: ECoreExecutionEngine(models: [:]))
+        context.setVariable("v", value: 1)
+        context.pushScope()
+        context.setVariable("v", value: 2)
+        context.pushScope()
+        context.setGlobalVariable("v", value: 3)
+        #expect(try await context.getVariable("v") as? Int == 3)
+        context.popScope()
+        context.popScope()
+        #expect(try await context.getVariable("v") as? Int == 3)
+
+        let flat = AQLExecutionContext(executionEngine: ECoreExecutionEngine(models: [:]))
+        flat.setGlobalVariable("w", value: 4)
+        #expect(try await flat.getVariable("w") as? Int == 4)
     }
 }
