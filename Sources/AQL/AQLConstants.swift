@@ -68,6 +68,9 @@ public enum AQLSyntax {
     /// The keyword for the integer division operator.
     public static let divKeyword = "div"
 
+    /// The words of the boolean literals.
+    public static let booleanLiterals: Set<String> = [trueLiteral, falseLiteral]
+
     /// The words that AQL reserves for its own syntax.
     ///
     /// The boolean literal words `true` and `false` are not included: they tokenise as literals.
