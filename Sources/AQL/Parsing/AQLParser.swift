@@ -6,13 +6,15 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// The outcome of parsing a piece of AQL text.
 public struct AQLParseResult: Sendable {
     /// The parsed expression, or `nil` if the text has a syntax error.
     public var expression: (any AQLExpression)?
 
     /// The problems found, in order of position. Empty if and only if ``expression`` is not `nil`.
-    public var diagnostics: [AQLDiagnostic]
+    public var diagnostics: [SourceDiagnostic]
 
     /// The tokens of the text, including comments and invalid tokens but not the end of input.
     public var tokens: [AQLToken]
@@ -23,7 +25,7 @@ public struct AQLParseResult: Sendable {
     ///   - expression: The parsed expression, if any.
     ///   - diagnostics: The problems found.
     ///   - tokens: The tokens of the text.
-    public init(expression: (any AQLExpression)?, diagnostics: [AQLDiagnostic], tokens: [AQLToken]) {
+    public init(expression: (any AQLExpression)?, diagnostics: [SourceDiagnostic], tokens: [AQLToken]) {
         self.expression = expression
         self.diagnostics = diagnostics
         self.tokens = tokens
@@ -73,7 +75,7 @@ public struct AQLParser: Sendable {
     public func parse(_ source: String, delegate: inout some AQLParserDelegate) -> AQLParseResult {
         let tokenisation = AQLTokeniser.tokenise(source)
         var diagnostics = tokenisation.diagnostics
-        let endToken = AQLToken(kind: .eof, span: Self.endSpan(of: source))
+        let endToken = AQLToken(kind: .eof, range: Self.endRange(of: source))
         var cursor = AQLTokenCursor(
             tokens: tokenisation.tokens.filter { !$0.isComment } + [endToken])
 
@@ -84,35 +86,27 @@ public struct AQLParser: Sendable {
                 expression = parsed
             } else {
                 throw AQLSyntaxError(
-                    AQLDiagnostic(
+                    SourceDiagnostic(
+                        severity: .error,
                         code: AQLDiagnosticCode.trailingTokens,
                         message: "Unexpected \(cursor.currentKind) after the expression",
-                        span: cursor.errorSpan))
+                        range: cursor.errorRange))
             }
         } catch let error as AQLSyntaxError {
-            let alreadyReported = diagnostics.contains { $0.span.offset == error.diagnostic.span.offset }
+            let alreadyReported = diagnostics.contains { $0.range?.start.utf8Offset == error.diagnostic.range?.start.utf8Offset }
             if !alreadyReported { diagnostics.append(error.diagnostic) }
         } catch {
             // The grammar only throws syntax errors.
         }
         if expression != nil && !diagnostics.isEmpty { expression = nil }
-        diagnostics.sort { $0.span.offset < $1.span.offset }
+        diagnostics.sort { ($0.range?.start.utf8Offset ?? 0) < ($1.range?.start.utf8Offset ?? 0) }
         return AQLParseResult(expression: expression, diagnostics: diagnostics, tokens: tokenisation.tokens)
     }
 
-    /// The span of the end of the text.
-    private static func endSpan(of source: String) -> AQLSourceSpan {
-        var line = 1
-        var column = 1
-        for character in source {
-            if character.isNewline {
-                line += 1
-                column = 1
-            } else {
-                column += 1
-            }
-        }
-        return AQLSourceSpan(line: line, column: column, offset: source.utf8.count, length: 0)
+    /// The empty range at the end of the text.
+    private static func endRange(of source: String) -> SourceRange {
+        let table = LineTable(source)
+        return table.range(fromUTF8Offset: table.utf8Count, to: table.utf8Count)
     }
 
     // MARK: - Reading from a host's tokens
@@ -209,12 +203,12 @@ extension AQLSyntax {
     ///
     /// This never fails and does not parse. Comments are included, and text that is not valid
     /// AQL (unterminated strings, unknown characters) comes back as
-    /// ``AQLTokenKind/invalid(_:)`` tokens, so every part of the text that is not blank is
+    /// ``SourceTokenKind/invalid`` tokens, so every part of the text that is not blank is
     /// covered by exactly one token.
     ///
     /// - Parameter source: The AQL text.
     /// - Returns: The tokens in order, without an end-of-input token.
-    public static func tokens(in source: String) -> [AQLToken] {
-        AQLTokeniser.tokenise(source).tokens
+    public static func tokens(in source: String) -> [SourceToken] {
+        AQLTokeniser.tokenise(source).tokens.map(\.sourceToken)
     }
 }

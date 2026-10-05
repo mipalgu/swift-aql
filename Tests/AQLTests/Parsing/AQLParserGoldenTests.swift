@@ -102,7 +102,7 @@ struct AQLParserGoldenTests {
         var delegate = HostProbeDelegate()
         let result = AQLParser().parse("collected('a' 'b')", delegate: &delegate)
         #expect(result.expression == nil)
-        #expect(result.diagnostics.first?.span.offset == 14)
+        #expect(result.diagnostics.first?.range?.start.utf8Offset == 14)
         #expect(result.diagnostics.first?.message.contains("Expected ')'") == true)
     }
 }

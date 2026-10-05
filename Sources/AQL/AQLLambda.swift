@@ -73,6 +73,9 @@ public struct AQLLambda: EcoreValue {
 /// Parsers build this node for the `x | body` argument of operations such as
 /// `select`, `collect` or `sortedBy`.
 public struct AQLLambdaExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     /// The iterator variable names.
     public let iterators: [String]
 
@@ -84,8 +87,9 @@ public struct AQLLambdaExpression: AQLExpression {
     /// - Parameters:
     ///   - iterator: The iterator variable name.
     ///   - body: The body expression.
-    public init(iterator: String, body: any AQLExpression) {
-        self.init(iterators: [iterator], body: body)
+    ///   - origin: Where the expression was written, if known.
+    public init(iterator: String, body: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.init(iterators: [iterator], body: body, origin: origin)
     }
 
     /// Creates a lambda expression with several iterator variables.
@@ -93,7 +97,9 @@ public struct AQLLambdaExpression: AQLExpression {
     /// - Parameters:
     ///   - iterators: The iterator variable names.
     ///   - body: The body expression.
-    public init(iterators: [String], body: any AQLExpression) {
+    ///   - origin: Where the expression was written, if known.
+    public init(iterators: [String], body: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.iterators = iterators
         self.body = body
     }

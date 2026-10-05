@@ -38,6 +38,8 @@ import Foundation
 /// )
 /// ```
 public struct AQLUnaryExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Types
 
@@ -65,7 +67,9 @@ public struct AQLUnaryExpression: AQLExpression {
     /// - Parameters:
     ///   - op: The operator
     ///   - operand: The operand
-    public init(op: Operator, operand: any AQLExpression) {
+    ///   - origin: Where the expression was written, if known.
+    public init(op: Operator, operand: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.op = op
         self.operand = operand
     }

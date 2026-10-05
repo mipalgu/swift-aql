@@ -13,6 +13,9 @@ import Foundation
 /// Elements keep their runtime values (objects stay objects). Nested
 /// collections are kept as elements, not flattened.
 public struct AQLCollectionLiteralExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     /// The kind of collection.
     public enum Kind: String, Sendable {
         /// An ordered collection that may contain duplicates.
@@ -36,7 +39,9 @@ public struct AQLCollectionLiteralExpression: AQLExpression {
     /// - Parameters:
     ///   - kind: The collection kind.
     ///   - elements: The element expressions.
-    public init(kind: Kind, elements: [any AQLExpression]) {
+    ///   - origin: Where the expression was written, if known.
+    public init(kind: Kind, elements: [any AQLExpression], origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.kind = kind
         self.elements = elements
     }

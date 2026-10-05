@@ -6,6 +6,8 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// The hooks through which a host language shapes the expressions that ``AQLParser`` builds.
 ///
 /// Both hooks have default implementations, so a host adopts only the one it needs. A host
@@ -25,9 +27,11 @@ public protocol AQLParserDelegate {
     ///   - name: The name of the operation.
     ///   - receiver: The receiver, if any.
     ///   - arguments: The argument expressions.
+    ///   - origin: Where the call was written.
     /// - Returns: The node for the call.
     mutating func makeCall(
-        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression]
+        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression],
+        origin: SourceOrigin
     ) -> any AQLExpression
 
     /// Offers the host the chance to parse a primary expression that starts with a name.
@@ -52,9 +56,10 @@ public protocol AQLParserDelegate {
 extension AQLParserDelegate {
     /// Builds an ``AQLCallExpression``.
     public mutating func makeCall(
-        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression]
+        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression],
+        origin: SourceOrigin
     ) -> any AQLExpression {
-        AQLCallExpression(source: receiver, methodName: name, arguments: arguments)
+        AQLCallExpression(source: receiver, methodName: name, arguments: arguments, origin: origin)
     }
 
     /// Declines every name.

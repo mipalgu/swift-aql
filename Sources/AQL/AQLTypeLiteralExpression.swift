@@ -13,6 +13,9 @@ import Foundation
 /// Evaluates to an ``AQLTypeDescriptor`` that type-aware services such as
 /// `filter`, `oclIsKindOf`, `eContents(Type)` and `allInstances` accept.
 public struct AQLTypeLiteralExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     /// The package name, or nil for an unqualified type.
     public let packageName: String?
 
@@ -24,7 +27,9 @@ public struct AQLTypeLiteralExpression: AQLExpression {
     /// - Parameters:
     ///   - packageName: The package name, or nil.
     ///   - typeName: The classifier name.
-    public init(packageName: String?, typeName: String) {
+    ///   - origin: Where the expression was written, if known.
+    public init(packageName: String?, typeName: String, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.packageName = packageName
         self.typeName = typeName
     }

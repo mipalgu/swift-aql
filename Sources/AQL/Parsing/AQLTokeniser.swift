@@ -6,13 +6,15 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// The tokens of a piece of AQL text together with the problems found while reading it.
 public struct AQLTokenisation: Sendable, Equatable {
     /// The tokens in order, including comments and invalid tokens but not the end of input.
     public var tokens: [AQLToken]
 
     /// The lexical problems in order of position.
-    public var diagnostics: [AQLDiagnostic]
+    public var diagnostics: [SourceDiagnostic]
 }
 
 /// Splits AQL text into tokens.
@@ -29,20 +31,17 @@ struct AQLTokeniser {
     /// The UTF-8 offset of each character, followed by the offset of the end of the text.
     private let offsets: [Int]
 
+    /// Converts offsets to line and column positions.
+    private let lineTable: LineTable
+
     /// The index of the next character.
     private var index = 0
-
-    /// The line of the next character.
-    private var line = 1
-
-    /// The column of the next character.
-    private var column = 1
 
     /// The tokens read so far.
     private var tokens: [AQLToken] = []
 
     /// The problems found so far.
-    private var diagnostics: [AQLDiagnostic] = []
+    private var diagnostics: [SourceDiagnostic] = []
 
     // MARK: - Entry point
 
@@ -58,6 +57,7 @@ struct AQLTokeniser {
 
     private init(_ text: String) {
         characters = Array(text)
+        lineTable = LineTable(text)
         var offsets: [Int] = []
         offsets.reserveCapacity(characters.count + 1)
         var offset = 0
@@ -94,11 +94,9 @@ struct AQLTokeniser {
     /// The position at which a token starts.
     private struct Mark {
         let index: Int
-        let line: Int
-        let column: Int
     }
 
-    private func mark() -> Mark { Mark(index: index, line: line, column: column) }
+    private func mark() -> Mark { Mark(index: index) }
 
     private var current: Character? { index < characters.count ? characters[index] : nil }
 
@@ -106,12 +104,6 @@ struct AQLTokeniser {
 
     private mutating func advance() {
         guard index < characters.count else { return }
-        if characters[index].isNewline {
-            line += 1
-            column = 1
-        } else {
-            column += 1
-        }
         index += 1
     }
 
@@ -119,18 +111,17 @@ struct AQLTokeniser {
         while let character = current, character.isWhitespace { advance() }
     }
 
-    private func span(from start: Mark) -> AQLSourceSpan {
-        AQLSourceSpan(
-            line: start.line, column: start.column, offset: offsets[start.index],
-            length: offsets[index] - offsets[start.index])
+    private func range(from start: Mark) -> SourceRange {
+        lineTable.range(fromUTF8Offset: offsets[start.index], to: offsets[index])
     }
 
     private mutating func emit(_ kind: AQLTokenKind, from start: Mark) {
-        tokens.append(AQLToken(kind: kind, span: span(from: start)))
+        tokens.append(AQLToken(kind: kind, range: range(from: start)))
     }
 
     private mutating func report(_ code: String, _ message: String, at start: Mark) {
-        diagnostics.append(AQLDiagnostic(code: code, message: message, span: span(from: start)))
+        diagnostics.append(
+            SourceDiagnostic(severity: .error, code: code, message: message, range: range(from: start)))
     }
 
     /// Whether the token ends an operand, so that a following minus sign is binary.
@@ -271,7 +262,7 @@ struct AQLTokeniser {
     private mutating func readUnicodeEscape() -> Character? {
         guard let first = readCodeUnit() else { return nil }
         if (0xD800...0xDBFF).contains(first), current == "\\" {
-            let resume = (index, line, column)
+            let resume = index
             advance()
             if current == "u" {
                 guard let second = readCodeUnit() else { return nil }
@@ -281,7 +272,7 @@ struct AQLTokeniser {
                     return Character(scalar)
                 }
             }
-            (index, line, column) = resume
+            index = resume
             return "\u{FFFD}"
         }
         return Unicode.Scalar(first).map(Character.init) ?? "\u{FFFD}"

@@ -6,6 +6,8 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// The kinds of token in AQL text.
 ///
 /// The cases beyond the AQL grammar itself (brackets and ``other``) exist so that a host
@@ -99,16 +101,16 @@ public struct AQLToken: Sendable, Equatable, Hashable {
     public var kind: AQLTokenKind
 
     /// Where the token is.
-    public var span: AQLSourceSpan
+    public var range: SourceRange
 
     /// Creates a token.
     ///
     /// - Parameters:
     ///   - kind: What the token is.
-    ///   - span: Where the token is.
-    public init(kind: AQLTokenKind, span: AQLSourceSpan) {
+    ///   - range: Where the token is.
+    public init(kind: AQLTokenKind, range: SourceRange) {
         self.kind = kind
-        self.span = span
+        self.range = range
     }
 
     /// Whether the token is a comment.
@@ -121,5 +123,36 @@ public struct AQLToken: Sendable, Equatable, Hashable {
     public var isInvalid: Bool {
         if case .invalid = kind { return true }
         return false
+    }
+}
+
+extension AQLTokenKind {
+    /// The kind of highlighting token that corresponds to this kind of token.
+    ///
+    /// Collection type names such as `Sequence` are reported as type names. Tokens of a host
+    /// language that AQL does not interpret are reported as plain text.
+    public var highlightKind: SourceTokenKind {
+        switch self {
+        case .keyword: return .keyword
+        case .identifier(let name):
+            return AQLSyntax.collectionTypeNames.contains(name) ? .typeName : .identifier
+        case .stringLiteral: return .string
+        case .integerLiteral, .realLiteral: return .number
+        case .booleanLiteral: return .boolean
+        case .operator: return .operator
+        case .comment: return .comment
+        case .invalid: return .invalid
+        case .other, .eof: return .text
+        case .leftParen, .rightParen, .comma, .colon, .doubleColon, .dot, .pipe, .questionMark,
+            .leftBrace, .rightBrace, .leftBracket, .rightBracket, .slash:
+            return .punctuation
+        }
+    }
+}
+
+extension AQLToken {
+    /// The token as a syntax highlighting token.
+    public var sourceToken: SourceToken {
+        SourceToken(kind: kind.highlightKind, range: range)
     }
 }

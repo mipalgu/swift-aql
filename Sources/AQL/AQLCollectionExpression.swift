@@ -71,6 +71,8 @@ import Foundation
 /// )
 /// ```
 public struct AQLCollectionExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Types
 
@@ -132,12 +134,15 @@ public struct AQLCollectionExpression: AQLExpression {
     ///   - operation: The operation to perform
     ///   - iterator: Optional iterator variable name
     ///   - body: Optional body expression
+    ///   - origin: Where the expression was written, if known.
     public init(
         source: any AQLExpression,
         operation: Operation,
         iterator: String? = nil,
-        body: (any AQLExpression)? = nil
+        body: (any AQLExpression)? = nil,
+        origin: SourceOrigin = .init()
     ) {
+        self.origin = origin
         self.source = source
         self.operation = operation
         self.iterator = iterator

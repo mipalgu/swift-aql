@@ -6,6 +6,8 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// A position in a sequence of tokens, together with the context the expression grammar keeps.
 ///
 /// A host that embeds AQL expressions in its own syntax creates a cursor over its tokens
@@ -93,8 +95,27 @@ public struct AQLTokenCursor: Sendable {
     }
 
     /// The position at which a problem at the current token is reported.
-    var errorSpan: AQLSourceSpan {
-        current?.span ?? tokens.last?.span ?? AQLSourceSpan(line: 1, column: 1)
+    var errorRange: SourceRange {
+        current?.range ?? tokens.last?.range ?? SourceRange(start: .start, end: .start)
+    }
+
+    /// The token before the current one, or `nil` at the first token.
+    public var previous: AQLToken? {
+        position > 0 && position <= tokens.count ? tokens[position - 1] : nil
+    }
+
+    /// Where the current token starts, or `nil` after the last token.
+    public var startPosition: SourcePosition? { current?.range.start }
+
+    /// The origin of the text that runs from a starting position to the end of the last token read.
+    ///
+    /// - Parameter start: Where the text starts, as given by ``startPosition``.
+    /// - Returns: The origin, or one without a range if there is no start or no token read.
+    public func origin(from start: SourcePosition?) -> SourceOrigin {
+        guard let start, let end = previous?.range.end, end.utf8Offset >= start.utf8Offset else {
+            return SourceOrigin()
+        }
+        return SourceOrigin(SourceRange(start: start, end: end))
     }
 
     /// Builds the error for a problem at the current token.
@@ -110,9 +131,10 @@ public struct AQLTokenCursor: Sendable {
         _ message: String, code: String = AQLDiagnosticCode.unexpectedToken
     ) -> AQLSyntaxError {
         AQLSyntaxError(
-            AQLDiagnostic(
+            SourceDiagnostic(
+                severity: .error,
                 code: currentKind == .eof ? AQLDiagnosticCode.unexpectedEnd : code,
-                message: message, span: errorSpan))
+                message: message, range: errorRange))
     }
 
     /// Consumes a token of the given kind.

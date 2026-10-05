@@ -49,6 +49,8 @@ import Foundation
 /// Variables defined in a let expression are only available within the body
 /// expression. They shadow any outer variables with the same name.
 public struct AQLLetExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Properties
 
@@ -65,7 +67,9 @@ public struct AQLLetExpression: AQLExpression {
     /// - Parameters:
     ///   - bindings: The variable bindings
     ///   - body: The body expression
-    public init(bindings: [(String, any AQLExpression)], body: any AQLExpression) {
+    ///   - origin: Where the expression was written, if known.
+    public init(bindings: [(String, any AQLExpression)], body: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.bindings = bindings
         self.body = body
     }

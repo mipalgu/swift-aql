@@ -6,44 +6,44 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
-import AQL
+import ECore
 import EMFBase
 
-/// Prints an AQL expression tree as one deterministic line for golden tests.
+/// Prints an AQL expression tree as one deterministic line.
 ///
 /// Every node prints as `kind(field, field, ...)` with children nested in the same form, so
 /// two trees print identically exactly when they have the same shape, operators, names and
 /// literal values. Host packages supply a hook for the node types that only they know.
-struct AQLTreePrinter {
+public struct AQLTreePrinter: Sendable {
 
     /// Prints a node that the printer does not know itself.
     ///
     /// The hook receives the node and the printer (to print children) and returns `nil` for
     /// nodes it does not know either.
-    typealias Hook = @Sendable (any AQLExpression, AQLTreePrinter) -> String?
+    public typealias Hook = @Sendable (any AQLExpression, AQLTreePrinter) -> String?
 
     /// The hook for host-specific node types.
-    let hook: Hook?
+    public let hook: Hook?
 
     /// Creates a printer.
     ///
     /// - Parameter hook: The hook for host-specific node types, if any.
-    init(hook: Hook? = nil) {
+    public init(hook: Hook? = nil) {
         self.hook = hook
     }
 
     /// Prints an optional child, using `-` for none.
-    func optional(_ expression: (any AQLExpression)?) -> String {
+    public func optional(_ expression: (any AQLExpression)?) -> String {
         expression.map { print($0) } ?? "-"
     }
 
     /// Prints a list of children.
-    func list(_ expressions: [any AQLExpression]) -> String {
+    public func list(_ expressions: [any AQLExpression]) -> String {
         "[" + expressions.map { print($0) }.joined(separator: ", ") + "]"
     }
 
     /// Quotes a string with the characters that would hide structure escaped.
-    func quoted(_ text: String) -> String {
+    public func quoted(_ text: String) -> String {
         var result = "\""
         for character in text {
             switch character {
@@ -59,7 +59,7 @@ struct AQLTreePrinter {
     }
 
     /// Prints a literal value with its type.
-    func literal(_ value: (any EcoreValue)?) -> String {
+    public func literal(_ value: (any EcoreValue)?) -> String {
         switch value {
         case nil: return "null"
         case let text as String: return "string(\(quoted(text)))"
@@ -74,7 +74,7 @@ struct AQLTreePrinter {
     ///
     /// - Parameter expression: The root of the tree.
     /// - Returns: The tree on one line.
-    func print(_ expression: any AQLExpression) -> String {
+    public func print(_ expression: any AQLExpression) -> String {
         switch expression {
         case let node as AQLVariableExpression:
             return "var(\(node.name))"

@@ -37,6 +37,8 @@ import Foundation
 ///
 /// If the condition evaluates to null or non-boolean, it is treated as false.
 public struct AQLConditionalExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Properties
 
@@ -57,11 +59,14 @@ public struct AQLConditionalExpression: AQLExpression {
     ///   - condition: The condition to test
     ///   - thenExpression: The true branch expression
     ///   - elseExpression: The false branch expression
+    ///   - origin: Where the expression was written, if known.
     public init(
         condition: any AQLExpression,
         thenExpression: any AQLExpression,
-        elseExpression: any AQLExpression
+        elseExpression: any AQLExpression,
+        origin: SourceOrigin = .init()
     ) {
+        self.origin = origin
         self.condition = condition
         self.thenExpression = thenExpression
         self.elseExpression = elseExpression

@@ -8,12 +8,14 @@
 
 import Testing
 
+import EMFBase
+
 @testable import AQL
 
 @Suite("AQL parser diagnostics")
 struct AQLParserDiagnosticsTests {
 
-    private func first(_ source: String) throws -> AQLDiagnostic {
+    private func first(_ source: String) throws -> SourceDiagnostic {
         try #require(AQLParser().parse(source).diagnostics.first)
     }
 
@@ -31,32 +33,32 @@ struct AQLParserDiagnosticsTests {
         let diagnostic = try first("1 + )")
         #expect(diagnostic.code == AQLDiagnosticCode.unexpectedToken)
         #expect(diagnostic.severity == .error)
-        #expect(diagnostic.span == AQLSourceSpan(line: 1, column: 5, offset: 4, length: 1))
+        #expect(diagnostic.range?.span == Span(line: 1, column: 5, offset: 4, length: 1))
         #expect(diagnostic.message.contains("Expected expression"))
-        #expect(diagnostic.line == 1 && diagnostic.column == 5)
-        #expect(diagnostic.offset == 4 && diagnostic.length == 1)
+        #expect(diagnostic.range?.start.line == 1 && diagnostic.range?.start.column == 5)
+        #expect(diagnostic.range?.start.utf8Offset == 4 && diagnostic.range?.utf8Length == 1)
     }
 
     @Test("An error on a later line has its line and column")
     func laterLine() throws {
         let diagnostic = try first("a\n  + *")
-        #expect(diagnostic.span.line == 2)
-        #expect(diagnostic.span.column == 5)
-        #expect(diagnostic.span.offset == 6)
+        #expect(diagnostic.range?.start.line == 2)
+        #expect(diagnostic.range?.start.column == 5)
+        #expect(diagnostic.range?.start.utf8Offset == 6)
     }
 
     @Test("Running out of text is reported at the end")
     func unexpectedEnd() throws {
         let diagnostic = try first("f(1,\n")
         #expect(diagnostic.code == AQLDiagnosticCode.unexpectedEnd)
-        #expect(diagnostic.span == AQLSourceSpan(line: 2, column: 1, offset: 5, length: 0))
+        #expect(diagnostic.range?.span == Span(line: 2, column: 1, offset: 5, length: 0))
     }
 
     @Test("Tokens after a complete expression are reported")
     func trailing() throws {
         let diagnostic = try first("1 2")
         #expect(diagnostic.code == AQLDiagnosticCode.trailingTokens)
-        #expect(diagnostic.span == AQLSourceSpan(line: 1, column: 3, offset: 2, length: 1))
+        #expect(diagnostic.range?.span == Span(line: 1, column: 3, offset: 2, length: 1))
         #expect(try first("x )").code == AQLDiagnosticCode.trailingTokens)
     }
 
@@ -66,7 +68,7 @@ struct AQLParserDiagnosticsTests {
         #expect(result.expression == nil)
         #expect(result.diagnostics.count == 1)
         #expect(result.diagnostics[0].code == AQLDiagnosticCode.unterminatedString)
-        #expect(result.diagnostics[0].span.offset == 4)
+        #expect(result.diagnostics[0].range?.start.utf8Offset == 4)
     }
 
     @Test("A lexical problem and a syntax error at different places are both reported, in order")
@@ -76,7 +78,7 @@ struct AQLParserDiagnosticsTests {
         #expect(result.diagnostics.map(\.code) == [
             AQLDiagnosticCode.unexpectedToken, AQLDiagnosticCode.unterminatedString,
         ])
-        #expect(result.diagnostics.map(\.span.offset) == [4, 6])
+        #expect(result.diagnostics.map { $0.range?.start.utf8Offset } == [4, 6])
         #expect(AQLParser().parse("1 # +").diagnostics.map(\.code) == [AQLDiagnosticCode.invalidCharacter])
     }
 
@@ -84,8 +86,8 @@ struct AQLParserDiagnosticsTests {
     func empty() throws {
         let diagnostic = try first("")
         #expect(diagnostic.code == AQLDiagnosticCode.unexpectedEnd)
-        #expect(diagnostic.span == AQLSourceSpan(line: 1, column: 1, offset: 0, length: 0))
-        #expect(try first("   -- only a comment").span.offset == 20)
+        #expect(diagnostic.range?.span == Span(line: 1, column: 1, offset: 0, length: 0))
+        #expect(try first("   -- only a comment").range?.start.utf8Offset == 20)
     }
 
     @Test("Each construct reports what it expected", arguments: [
@@ -109,15 +111,9 @@ struct AQLParserDiagnosticsTests {
     @Test("A syntax error carries a diagnostic and a description")
     func errorDescription() {
         let error = AQLSyntaxError(
-            AQLDiagnostic(code: "c", message: "m", span: AQLSourceSpan(line: 3, column: 4)))
+            SourceDiagnostic(severity: .error, code: "c", message: "m", range: .at(line: 3, column: 4)))
         #expect(error.description == "Line 3, column 4: m")
         #expect(error == AQLSyntaxError(error.diagnostic))
-    }
-
-    @Test("Spans default to an empty range at offset zero")
-    func spanDefaults() {
-        let span = AQLSourceSpan(line: 1, column: 1)
-        #expect(span.offset == 0 && span.length == 0 && span.endOffset == 0)
     }
 }
 
@@ -128,7 +124,7 @@ struct AQLTokenCursorTests {
         -> AQLTokenCursor
     {
         AQLTokenCursor(
-            tokens: AQLSyntax.tokens(in: source) + [AQLToken(kind: .eof, span: AQLSourceSpan(line: 1, column: 1))],
+            tokens: AQLTokeniser.tokenise(source).tokens + [AQLToken(kind: .eof, range: .at(line: 1, column: 1))],
             terminator: terminator)
     }
 
@@ -166,11 +162,11 @@ struct AQLTokenCursorTests {
 
         var dividing = AQLTokenCursor(
             tokens: [
-                AQLToken(kind: .identifier("a"), span: AQLSourceSpan(line: 1, column: 1)),
-                AQLToken(kind: .slash, span: AQLSourceSpan(line: 1, column: 2)),
-                AQLToken(kind: .identifier("b"), span: AQLSourceSpan(line: 1, column: 3)),
-                AQLToken(kind: .rightBracket, span: AQLSourceSpan(line: 1, column: 4)),
-                AQLToken(kind: .eof, span: AQLSourceSpan(line: 1, column: 5)),
+                AQLToken(kind: .identifier("a"), range: .at(line: 1, column: 1)),
+                AQLToken(kind: .slash, range: .at(line: 1, column: 2)),
+                AQLToken(kind: .identifier("b"), range: .at(line: 1, column: 3)),
+                AQLToken(kind: .rightBracket, range: .at(line: 1, column: 4)),
+                AQLToken(kind: .eof, range: .at(line: 1, column: 5)),
             ], terminator: slashBeforeBracket)
         let divided = try AQLParser.parseExpression(&dividing, delegate: &delegate)
         #expect(AQLTreePrinter().print(divided) == "binary(/, var(a), var(b))")
@@ -178,10 +174,10 @@ struct AQLTokenCursorTests {
 
         var ending = AQLTokenCursor(
             tokens: [
-                AQLToken(kind: .identifier("a"), span: AQLSourceSpan(line: 1, column: 1)),
-                AQLToken(kind: .slash, span: AQLSourceSpan(line: 1, column: 2)),
-                AQLToken(kind: .rightBracket, span: AQLSourceSpan(line: 1, column: 3)),
-                AQLToken(kind: .eof, span: AQLSourceSpan(line: 1, column: 4)),
+                AQLToken(kind: .identifier("a"), range: .at(line: 1, column: 1)),
+                AQLToken(kind: .slash, range: .at(line: 1, column: 2)),
+                AQLToken(kind: .rightBracket, range: .at(line: 1, column: 3)),
+                AQLToken(kind: .eof, range: .at(line: 1, column: 4)),
             ], terminator: slashBeforeBracket)
         let single = try AQLParser.parseExpression(&ending, delegate: &delegate)
         #expect(AQLTreePrinter().print(single) == "var(a)")
@@ -191,7 +187,7 @@ struct AQLTokenCursorTests {
     @Test("A host can start inside an implicit receiver context")
     func initialImplicitReceiver() throws {
         var cursor = AQLTokenCursor(
-            tokens: AQLSyntax.tokens(in: "f()") + [AQLToken(kind: .eof, span: AQLSourceSpan(line: 1, column: 4))],
+            tokens: AQLTokeniser.tokenise("f()").tokens + [AQLToken(kind: .eof, range: .at(line: 1, column: 4))],
             implicitReceiverDepth: 1)
         var delegate = AQLDefaultParserDelegate()
         let expression = try AQLParser.parseExpression(&cursor, delegate: &delegate)

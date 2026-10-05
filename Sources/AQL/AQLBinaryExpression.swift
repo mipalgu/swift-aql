@@ -55,6 +55,8 @@ import Foundation
 /// )
 /// ```
 public struct AQLBinaryExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Types
 
@@ -102,7 +104,9 @@ public struct AQLBinaryExpression: AQLExpression {
     ///   - left: The left operand
     ///   - op: The operator
     ///   - right: The right operand
-    public init(left: any AQLExpression, op: Operator, right: any AQLExpression) {
+    ///   - origin: Where the expression was written, if known.
+    public init(left: any AQLExpression, op: Operator, right: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.left = left
         self.op = op
         self.right = right

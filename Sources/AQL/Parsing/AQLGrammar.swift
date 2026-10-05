@@ -6,6 +6,8 @@
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
 
+import EMFBase
+
 /// The recursive descent grammar of AQL expressions.
 ///
 /// From loosest to tightest binding the levels are `implies` (right associative), `or` and
@@ -93,14 +95,16 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
 
     /// Parses `implies`, the loosest binding operator, which associates to the right.
     private mutating func parseImplies() throws -> any AQLExpression {
+        let start = cursor.startPosition
         let left = try parseLogicalOr()
         guard case .keyword(AQLSyntax.impliesKeyword) = cursor.currentKind else { return left }
         cursor.advance()
         let right = try parseImplies()
-        return AQLBinaryExpression(left: left, op: .implies, right: right)
+        return AQLBinaryExpression(left: left, op: .implies, right: right, origin: cursor.origin(from: start))
     }
 
     private mutating func parseLogicalOr() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var left = try parseLogicalAnd()
         while true {
             let op: AQLBinaryExpression.Operator
@@ -110,24 +114,29 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
             default: return left
             }
             cursor.advance()
-            left = AQLBinaryExpression(left: left, op: op, right: try parseLogicalAnd())
+            let right = try parseLogicalAnd()
+            left = AQLBinaryExpression(left: left, op: op, right: right, origin: cursor.origin(from: start))
         }
     }
 
     private mutating func parseLogicalAnd() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var left = try parseComparison()
         while case .keyword(AQLSyntax.andKeyword) = cursor.currentKind {
             cursor.advance()
-            left = AQLBinaryExpression(left: left, op: .and, right: try parseComparison())
+            let right = try parseComparison()
+            left = AQLBinaryExpression(left: left, op: .and, right: right, origin: cursor.origin(from: start))
         }
         return left
     }
 
     private mutating func parseComparison() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var left = try parseAdditive()
         while let op = comparisonOperator() {
             cursor.advance()
-            left = AQLBinaryExpression(left: left, op: op, right: try parseAdditive())
+            let right = try parseAdditive()
+            left = AQLBinaryExpression(left: left, op: op, right: right, origin: cursor.origin(from: start))
         }
         return left
     }
@@ -147,6 +156,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
     }
 
     private mutating func parseAdditive() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var left = try parseMultiplicative()
         while true {
             let op: AQLBinaryExpression.Operator
@@ -156,11 +166,13 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
             default: return left
             }
             cursor.advance()
-            left = AQLBinaryExpression(left: left, op: op, right: try parseMultiplicative())
+            let right = try parseMultiplicative()
+            left = AQLBinaryExpression(left: left, op: op, right: right, origin: cursor.origin(from: start))
         }
     }
 
     private mutating func parseMultiplicative() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var left = try parseUnary()
         while true {
             let op: AQLBinaryExpression.Operator
@@ -172,19 +184,23 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
             default: return left
             }
             cursor.advance()
-            left = AQLBinaryExpression(left: left, op: op, right: try parseUnary())
+            let right = try parseUnary()
+            left = AQLBinaryExpression(left: left, op: op, right: right, origin: cursor.origin(from: start))
         }
     }
 
     /// Parses unary `not` and `-`, which associate to the right.
     private mutating func parseUnary() throws -> any AQLExpression {
+        let start = cursor.startPosition
         switch cursor.currentKind {
         case .keyword(AQLSyntax.notKeyword):
             cursor.advance()
-            return AQLUnaryExpression(op: .not, operand: try parseUnary())
+            let operand = try parseUnary()
+            return AQLUnaryExpression(op: .not, operand: operand, origin: cursor.origin(from: start))
         case .operator(AQLSyntax.minus):
             cursor.advance()
-            return AQLUnaryExpression(op: .negate, operand: try parseUnary())
+            let operand = try parseUnary()
+            return AQLUnaryExpression(op: .negate, operand: operand, origin: cursor.origin(from: start))
         default:
             return try parseNavigation()
         }
@@ -194,6 +210,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
 
     /// Parses `object.property`, `object.operation(arguments)`, and `collection->operation(...)`.
     private mutating func parseNavigation() throws -> any AQLExpression {
+        let start = cursor.startPosition
         var expression = try parsePrimary()
         while true {
             switch cursor.currentKind {
@@ -207,13 +224,16 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
                 cursor.advance()
                 if cursor.currentKind == .leftParen {
                     let arguments = try parseCallArguments(forOperation: name)
-                    expression = delegate.makeCall(name: name, receiver: expression, arguments: arguments)
+                    expression = delegate.makeCall(
+                        name: name, receiver: expression, arguments: arguments,
+                        origin: cursor.origin(from: start))
                 } else {
-                    expression = AQLNavigationExpression(source: expression, property: name)
+                    expression = AQLNavigationExpression(
+                        source: expression, property: name, origin: cursor.origin(from: start))
                 }
             case .operator(AQLSyntax.arrow):
                 cursor.advance()
-                expression = try parseCollectionOperation(source: expression)
+                expression = try parseCollectionOperation(source: expression, from: start)
             default:
                 return expression
             }
@@ -221,7 +241,9 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
     }
 
     /// Parses the operation after `->`.
-    private mutating func parseCollectionOperation(source: any AQLExpression) throws -> any AQLExpression {
+    private mutating func parseCollectionOperation(
+        source: any AQLExpression, from start: SourcePosition?
+    ) throws -> any AQLExpression {
         let name: String
         switch cursor.currentKind {
         case .identifier(let text), .keyword(let text): name = text
@@ -244,7 +266,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         case "last": operation = .last
         case "indexOf": operation = .indexOf
         default:
-            return try parseGenericCollectionOperation(named: name, source: source)
+            return try parseGenericCollectionOperation(named: name, source: source, from: start)
         }
 
         switch operation {
@@ -253,12 +275,14 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
                 cursor.advance()
                 try expect(.rightParen)
             }
-            return AQLCollectionExpression(source: source, operation: operation)
+            return AQLCollectionExpression(
+                source: source, operation: operation, origin: cursor.origin(from: start))
         case .indexOf:
             try expect(.leftParen)
             let argument = try parseExpression()
             try expect(.rightParen)
-            return AQLCollectionExpression(source: source, operation: operation, body: argument)
+            return AQLCollectionExpression(
+                source: source, operation: operation, body: argument, origin: cursor.origin(from: start))
         default:
             break
         }
@@ -271,45 +295,50 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         defer { if usesImplicitIterator { cursor.implicitReceiverDepth -= 1 } }
         let body = try parseExpression()
         try expect(.rightParen)
-        return AQLCollectionExpression(source: source, operation: operation, iterator: iterator, body: body)
+        return AQLCollectionExpression(
+            source: source, operation: operation, iterator: iterator, body: body,
+            origin: cursor.origin(from: start))
     }
 
     /// Parses the arguments of a `->name(...)` operation that has no dedicated AQL node.
     private mutating func parseGenericCollectionOperation(
-        named name: String, source: any AQLExpression
+        named name: String, source: any AQLExpression, from start: SourcePosition?
     ) throws -> any AQLExpression {
         var arguments: [any AQLExpression] = []
         if cursor.currentKind == .leftParen {
             arguments = try parseCallArguments(forOperation: name, afterArrow: true)
         }
-        return AQLCallExpression(source: source, methodName: name, arguments: arguments, usesArrow: true)
+        return AQLCallExpression(
+            source: source, methodName: name, arguments: arguments, usesArrow: true,
+            origin: cursor.origin(from: start))
     }
 
     // MARK: - Primary expressions
 
     private mutating func parsePrimary() throws -> any AQLExpression {
+        let start = cursor.startPosition
         switch cursor.currentKind {
         case .stringLiteral(let value):
             cursor.advance()
-            return AQLLiteralExpression(value: value)
+            return AQLLiteralExpression(value: value, origin: cursor.origin(from: start))
         case .integerLiteral(let value):
             cursor.advance()
-            return AQLLiteralExpression(value: value)
+            return AQLLiteralExpression(value: value, origin: cursor.origin(from: start))
         case .realLiteral(let value):
             cursor.advance()
-            return AQLLiteralExpression(value: value)
+            return AQLLiteralExpression(value: value, origin: cursor.origin(from: start))
         case .booleanLiteral(let value):
             cursor.advance()
-            return AQLLiteralExpression(value: value)
+            return AQLLiteralExpression(value: value, origin: cursor.origin(from: start))
         case .keyword(AQLSyntax.nullKeyword):
             cursor.advance()
-            return AQLLiteralExpression(value: nil)
+            return AQLLiteralExpression(value: nil, origin: cursor.origin(from: start))
         case .keyword(AQLSyntax.ifKeyword):
             cursor.advance()
-            return try parseConditional()
+            return try parseConditional(from: start)
         case .keyword(AQLSyntax.letKeyword):
             cursor.advance()
-            return try parseLet()
+            return try parseLet(from: start)
         case .identifier(let name), .keyword(let name):
             return try parseName(name)
         case .leftParen:
@@ -323,7 +352,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
     }
 
     /// Parses the rest of `if condition then a else b endif`; `if` is already consumed.
-    private mutating func parseConditional() throws -> any AQLExpression {
+    private mutating func parseConditional(from start: SourcePosition?) throws -> any AQLExpression {
         let condition = try parseExpression()
         try expectKeyword(AQLSyntax.thenKeyword)
         let thenExpression = try parseExpression()
@@ -331,11 +360,12 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         let elseExpression = try parseExpression()
         try expectKeyword(AQLSyntax.endifKeyword)
         return AQLConditionalExpression(
-            condition: condition, thenExpression: thenExpression, elseExpression: elseExpression)
+            condition: condition, thenExpression: thenExpression, elseExpression: elseExpression,
+            origin: cursor.origin(from: start))
     }
 
     /// Parses the rest of `let x : T = e, y = f in body`; `let` is already consumed.
-    private mutating func parseLet() throws -> any AQLExpression {
+    private mutating func parseLet(from start: SourcePosition?) throws -> any AQLExpression {
         var bindings: [(String, any AQLExpression)] = []
         while true {
             let name = try parseNameSegment(describing: "variable name")
@@ -349,15 +379,17 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
             cursor.advance()
         }
         try expectKeyword(AQLSyntax.inKeyword)
-        return AQLLetExpression(bindings: bindings, body: try parseExpression())
+        let body = try parseExpression()
+        return AQLLetExpression(bindings: bindings, body: body, origin: cursor.origin(from: start))
     }
 
     /// Parses a name, a qualified name, a call, or a collection literal.
     ///
     /// The current token must be the identifier or keyword `first`.
     private mutating func parseName(_ first: String) throws -> any AQLExpression {
+        let start = cursor.startPosition
         if AQLSyntax.collectionTypeNames.contains(first), cursor.peekKind() == .leftBrace {
-            return try parseCollectionLiteral(kind: first)
+            return try parseCollectionLiteral(kind: first, from: start)
         }
 
         if let hosted = try delegate.parsePrimary(named: first, cursor: &cursor) { return hosted }
@@ -365,7 +397,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         if cursor.peekKind() == .leftParen {
             cursor.advance()
             let arguments = try parseCallArguments(forOperation: first)
-            return makeBareCall(name: first, arguments: arguments)
+            return makeBareCall(name: first, arguments: arguments, from: start)
         }
 
         cursor.advance()
@@ -374,7 +406,7 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
             cursor.advance()
             segments.append(try parseNameSegment(describing: "name after '::'"))
         }
-        return qualifiedReference(segments)
+        return qualifiedReference(segments, origin: cursor.origin(from: start))
     }
 
     /// Builds the node for a name written with `::` separators.
@@ -382,21 +414,22 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
     /// A single segment is a variable. Inside the arguments of a type operation every
     /// qualified name is a type. Elsewhere `package::Type` is a type and
     /// `package::Enumeration::literal` is an enumeration literal.
-    private func qualifiedReference(_ segments: [String]) -> any AQLExpression {
-        guard segments.count > 1 else { return AQLVariableExpression(name: segments[0]) }
+    private func qualifiedReference(_ segments: [String], origin: SourceOrigin) -> any AQLExpression {
+        guard segments.count > 1 else { return AQLVariableExpression(name: segments[0], origin: origin) }
         let last = segments[segments.count - 1]
         let separator = AQLSyntax.packageSeparator
         if cursor.typeArgumentDepth > 0 || segments.count == 2 {
             return AQLTypeLiteralExpression(
-                packageName: segments.dropLast().joined(separator: separator), typeName: last)
+                packageName: segments.dropLast().joined(separator: separator), typeName: last,
+                origin: origin)
         }
         return AQLEnumLiteralExpression(
             packageName: segments.dropLast(2).joined(separator: separator),
-            enumName: segments[segments.count - 2], literal: last)
+            enumName: segments[segments.count - 2], literal: last, origin: origin)
     }
 
     /// Parses `Kind{element, element}`.
-    private mutating func parseCollectionLiteral(kind: String) throws -> any AQLExpression {
+    private mutating func parseCollectionLiteral(kind: String, from start: SourcePosition?) throws -> any AQLExpression {
         cursor.advance()
         try expect(.leftBrace)
         var elements: [any AQLExpression] = []
@@ -409,7 +442,8 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         }
         try expect(.rightBrace)
         let literalKind = AQLCollectionLiteralExpression.Kind(rawValue: kind) ?? .sequence
-        return AQLCollectionLiteralExpression(kind: literalKind, elements: elements)
+        return AQLCollectionLiteralExpression(
+            kind: literalKind, elements: elements, origin: cursor.origin(from: start))
     }
 
     // MARK: - Calls and lambdas
@@ -443,13 +477,17 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
 
     /// Parses one call argument, which is a lambda or an expression.
     private mutating func parseCallArgument(iterates: Bool) throws -> any AQLExpression {
+        let start = cursor.startPosition
         if let header = try parseLambdaHeader() {
-            return AQLLambdaExpression(iterator: header.name, body: try parseExpression())
+            let body = try parseExpression()
+            return AQLLambdaExpression(iterator: header.name, body: body, origin: cursor.origin(from: start))
         }
         if iterates {
             cursor.implicitReceiverDepth += 1
             defer { cursor.implicitReceiverDepth -= 1 }
-            return AQLLambdaExpression(iterator: AQLSyntax.selfVariable, body: try parseExpression())
+            let body = try parseExpression()
+            return AQLLambdaExpression(
+                iterator: AQLSyntax.selfVariable, body: body, origin: cursor.origin(from: start))
         }
         return try parseExpression()
     }
@@ -491,13 +529,17 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
     ///
     /// Inside an iterator body, and for OCL type operations, the receiver is the implicit
     /// `self`.
-    private mutating func makeBareCall(name: String, arguments: [any AQLExpression]) -> any AQLExpression {
+    private mutating func makeBareCall(
+        name: String, arguments: [any AQLExpression], from start: SourcePosition?
+    ) -> any AQLExpression {
+        let origin = cursor.origin(from: start)
         let implicitSelf = AQLVariableExpression(name: AQLSyntax.selfVariable)
         if AQLSyntax.typeOperationNames.contains(name) {
-            return delegate.makeCall(name: name, receiver: implicitSelf, arguments: arguments)
+            return delegate.makeCall(name: name, receiver: implicitSelf, arguments: arguments, origin: origin)
         }
         let appliesToSelf = cursor.implicitReceiverDepth > 0
             && !AQLSyntax.standaloneFunctionNames.contains(name)
-        return delegate.makeCall(name: name, receiver: appliesToSelf ? implicitSelf : nil, arguments: arguments)
+        return delegate.makeCall(
+            name: name, receiver: appliesToSelf ? implicitSelf : nil, arguments: arguments, origin: origin)
     }
 }

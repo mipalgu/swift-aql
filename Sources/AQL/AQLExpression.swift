@@ -14,6 +14,12 @@ import Foundation
 
 /// Protocol for AQL expressions that can be evaluated within an execution context.
 public protocol AQLExpression: Sendable {
+    /// Where the expression was written, if it was parsed from source text.
+    ///
+    /// The origin never takes part in equality, so trees that differ only in where they were
+    /// written compare equal. Nodes built in code have an origin without a range.
+    var origin: SourceOrigin { get }
+
     /// Evaluates the expression within the specified execution context.
     ///
     /// - Parameter context: The execution context providing model access and variable bindings
@@ -23,6 +29,11 @@ public protocol AQLExpression: Sendable {
     func evaluate(in context: AQLExecutionContext) async throws -> (any EcoreValue)?
 }
 
+extension AQLExpression {
+    /// An origin without a range, for expressions that were not parsed from source text.
+    public var origin: SourceOrigin { SourceOrigin() }
+}
+
 // MARK: - Variable Expression
 
 /// Represents a variable reference in AQL.
@@ -30,9 +41,13 @@ public protocol AQLExpression: Sendable {
 /// AQL allows implicit 'self'. If the variable is not found in the context,
 /// the context implementation may try to resolve it as a property of 'self'.
 public struct AQLVariableExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     public let name: String
 
-    public init(name: String) {
+    public init(name: String, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.name = name
     }
 
@@ -46,13 +61,20 @@ public struct AQLVariableExpression: AQLExpression {
 
 /// Represents property navigation (e.g., `object.property` or `object.reference`).
 public struct AQLNavigationExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     public let source: any AQLExpression
     public let property: String
 
     /// If true, this is a null-safe navigation (AQL is generally forgiving).
     public let isNullSafe: Bool
 
-    public init(source: any AQLExpression, property: String, isNullSafe: Bool = true) {
+    public init(
+        source: any AQLExpression, property: String, isNullSafe: Bool = true,
+        origin: SourceOrigin = .init()
+    ) {
+        self.origin = origin
         self.source = source
         self.property = property
         self.isNullSafe = isNullSafe
@@ -91,9 +113,13 @@ public struct AQLNavigationExpression: AQLExpression {
 
 /// Represents a literal value (String, Integer, Boolean, Real, null).
 public struct AQLLiteralExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     public let value: (any EcoreValue)?
 
-    public init(value: (any EcoreValue)?) {
+    public init(value: (any EcoreValue)?, origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.value = value
     }
 
@@ -107,6 +133,9 @@ public struct AQLLiteralExpression: AQLExpression {
 
 /// Represents AQL string interpolation: `'some text ${expression} more text'`.
 public struct AQLStringInterpolationExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
+
     public struct Part: Sendable {
         let literal: String
         let expression: (any AQLExpression)?
@@ -119,7 +148,8 @@ public struct AQLStringInterpolationExpression: AQLExpression {
 
     public let parts: [Part]
 
-    public init(parts: [Part]) {
+    public init(parts: [Part], origin: SourceOrigin = .init()) {
+        self.origin = origin
         self.parts = parts
     }
 

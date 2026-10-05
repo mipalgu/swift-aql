@@ -14,7 +14,7 @@ import Testing
 struct AQLTokeniserTests {
 
     private func kinds(_ source: String) -> [AQLTokenKind] {
-        AQLSyntax.tokens(in: source).map(\.kind)
+        AQLTokeniser.tokenise(source).tokens.map(\.kind)
     }
 
     @Test("Punctuation and operators")
@@ -78,7 +78,7 @@ struct AQLTokeniserTests {
         let unterminated = AQLTokeniser.tokenise("a 'oops")
         #expect(unterminated.tokens.map(\.kind) == [.identifier("a"), .invalid("'oops")])
         #expect(unterminated.diagnostics.map(\.code) == [AQLDiagnosticCode.unterminatedString])
-        #expect(unterminated.diagnostics.first?.span == AQLSourceSpan(line: 1, column: 3, offset: 2, length: 5))
+        #expect(unterminated.diagnostics.first?.range?.span == Span(line: 1, column: 3, offset: 2, length: 5))
 
         let escape = AQLTokeniser.tokenise(#"'\u12'"#)
         #expect(escape.diagnostics.map(\.code) == [AQLDiagnosticCode.malformedEscape])
@@ -99,20 +99,20 @@ struct AQLTokeniserTests {
     @Test("Tokens carry line, column, UTF-8 offset and length")
     func positions() {
         let tokens = AQLSyntax.tokens(in: "ab +\n  'é' -- c")
-        #expect(tokens.map(\.span) == [
-            AQLSourceSpan(line: 1, column: 1, offset: 0, length: 2),
-            AQLSourceSpan(line: 1, column: 4, offset: 3, length: 1),
-            AQLSourceSpan(line: 2, column: 3, offset: 7, length: 4),
-            AQLSourceSpan(line: 2, column: 7, offset: 12, length: 4),
+        #expect(tokens.map(\.range.span) == [
+            Span(line: 1, column: 1, offset: 0, length: 2),
+            Span(line: 1, column: 4, offset: 3, length: 1),
+            Span(line: 2, column: 3, offset: 7, length: 4),
+            Span(line: 2, column: 7, offset: 12, length: 4),
         ])
-        #expect(tokens[2].span.endOffset == 11)
+        #expect(tokens[2].range.end.utf8Offset == 11)
     }
 
     @Test("Line breaks of every style start a new line")
     func lineBreaks() {
         let tokens = AQLSyntax.tokens(in: "a\r\nb\rc\nd")
-        #expect(tokens.map(\.span.line) == [1, 2, 3, 4])
-        #expect(tokens.map(\.span.column) == [1, 1, 1, 1])
+        #expect(tokens.map(\.range.start.line) == [1, 2, 3, 4])
+        #expect(tokens.map(\.range.start.column) == [1, 1, 1, 1])
     }
 
     @Test("Highlighting covers all non-blank text, including comments and invalid text")
@@ -122,7 +122,7 @@ struct AQLTokeniserTests {
         let utf8 = Array(source.utf8)
         var covered = Array(repeating: false, count: utf8.count)
         for token in tokens {
-            for index in token.span.offset..<token.span.endOffset {
+            for index in token.range.start.utf8Offset..<token.range.end.utf8Offset {
                 #expect(!covered[index])
                 covered[index] = true
             }
@@ -131,8 +131,8 @@ struct AQLTokeniserTests {
         for (index, byte) in utf8.enumerated() where !blanks.contains(byte) {
             #expect(covered[index], "byte \(index) is not covered")
         }
-        #expect(tokens.contains { $0.isComment })
-        #expect(tokens.contains { $0.isInvalid })
+        #expect(tokens.contains { $0.kind == .comment })
+        #expect(tokens.contains { $0.kind == .invalid })
     }
 
     @Test("Highlighting never throws on arbitrary text")

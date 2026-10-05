@@ -37,10 +37,11 @@ struct HostProbeDelegate: AQLParserDelegate {
     var offered: [String] = []
 
     mutating func makeCall(
-        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression]
+        name: String, receiver: (any AQLExpression)?, arguments: [any AQLExpression],
+        origin: SourceOrigin
     ) -> any AQLExpression {
         if AQLSyntax.typeOperationNames.contains(name) {
-            return AQLCallExpression(source: receiver, methodName: name, arguments: arguments)
+            return AQLCallExpression(source: receiver, methodName: name, arguments: arguments, origin: origin)
         }
         return InvocationProbe(name: name, receiver: receiver, arguments: arguments)
     }
@@ -84,5 +85,33 @@ enum AQLParserTestSupport {
     /// Parses text with the default delegate and prints the tree, or returns `nil` on error.
     static func plainTree(_ source: String) -> String? {
         AQLParser().parse(source).expression.map { AQLTreePrinter().print($0) }
+    }
+}
+
+/// A start position and length in the form the parser tests compare.
+struct Span: Equatable {
+    var line: Int
+    var column: Int
+    var offset: Int
+    var length: Int = 0
+
+    init(line: Int, column: Int, offset: Int = 0, length: Int = 0) {
+        self.line = line
+        self.column = column
+        self.offset = offset
+        self.length = length
+    }
+}
+
+extension SourceRange {
+    /// The range as a ``Span``.
+    var span: Span {
+        Span(line: start.line, column: start.column, offset: start.utf8Offset, length: utf8Length)
+    }
+
+    /// An empty range at the given line and column.
+    static func at(line: Int, column: Int) -> SourceRange {
+        let position = SourcePosition(utf8Offset: column - 1, line: line, column: column)
+        return SourceRange(start: position, end: position)
     }
 }

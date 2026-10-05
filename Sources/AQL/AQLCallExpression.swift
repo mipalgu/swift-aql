@@ -52,6 +52,8 @@ import Foundation
 /// Operations such as `select` take an ``AQLLambdaExpression`` argument. Arguments of services that
 /// accept type arguments may be bare identifiers or ``AQLTypeLiteralExpression`` nodes.
 public struct AQLCallExpression: AQLExpression {
+    /// Where the expression was written, if known.
+    public let origin: SourceOrigin
 
     // MARK: - Properties
 
@@ -79,12 +81,15 @@ public struct AQLCallExpression: AQLExpression {
     ///   - methodName: The method name
     ///   - arguments: The argument expressions
     ///   - usesArrow: Whether the call was written with `->`
+    ///   - origin: Where the expression was written, if known.
     public init(
         source: (any AQLExpression)? = nil,
         methodName: String,
         arguments: [any AQLExpression] = [],
-        usesArrow: Bool = false
+        usesArrow: Bool = false,
+        origin: SourceOrigin = .init()
     ) {
+        self.origin = origin
         self.source = source
         self.methodName = methodName
         self.arguments = arguments
