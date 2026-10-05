@@ -227,6 +227,28 @@ struct AQLCollectionServicesTests {
         #expect(try await nothing.evaluate(in: makeContext()) == nil)
     }
 
+    @Test(
+        "Quantifiers treat a null source as an empty collection",
+        arguments: [
+            (AQLCollectionExpression.Operation.exists, false),
+            (.forAll, true),
+            (.one, false),
+            (.isUnique, true),
+        ])
+    func quantifiersOnNullSource(operation: AQLCollectionExpression.Operation, expected: Bool) async throws {
+        let quantifier = AQLCollectionExpression(
+            source: lit(nil), operation: operation, iterator: "x", body: lit(true))
+        #expect(try await quantifier.evaluate(in: makeContext()) as? Bool == expected)
+    }
+
+    @Test("A negated quantifier over a null source is a Boolean")
+    func negatedQuantifierOnNullSource() async throws {
+        let exists = AQLCollectionExpression(
+            source: lit(nil), operation: .exists, iterator: "x", body: lit(true))
+        let negated = AQLUnaryExpression(op: .not, operand: exists)
+        #expect(try await negated.evaluate(in: makeContext()) as? Bool == true)
+    }
+
     // MARK: Equality
 
     @Test("Objects compare by identity, values by value")

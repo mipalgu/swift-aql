@@ -148,7 +148,10 @@ public struct AQLCollectionExpression: AQLExpression {
 
     /// Evaluates the operation by calling the collection service of the same name.
     ///
-    /// A null source yields the neutral result of the operation (0, true, false, null or -1).
+    /// A null source is treated as an empty collection by the operations that answer a
+    /// question about it: `size` is 0, `isEmpty`, `forAll` and `isUnique` are true,
+    /// `notEmpty`, `exists` and `one` are false, and `indexOf` reports that the element is
+    /// absent. The remaining operations yield null.
     /// Operations with an iterator pass an ``AQLLambda`` built from ``iterator`` and ``body``;
     /// without an iterator, ``body`` is passed as an ordinary argument.
     @MainActor
@@ -158,8 +161,8 @@ public struct AQLCollectionExpression: AQLExpression {
         guard sourceValue != nil else {
             switch operation {
             case .size: return 0
-            case .isEmpty: return true
-            case .notEmpty: return false
+            case .isEmpty, .forAll, .isUnique: return true
+            case .notEmpty, .exists, .one: return false
             case .indexOf: return context.usesOneBasedIndexOf ? 0 : -1
             default: return nil
             }
