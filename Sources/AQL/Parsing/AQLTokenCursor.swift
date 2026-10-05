@@ -96,4 +96,33 @@ public struct AQLTokenCursor: Sendable {
     var errorSpan: AQLSourceSpan {
         current?.span ?? tokens.last?.span ?? AQLSourceSpan(line: 1, column: 1)
     }
+
+    /// Builds the error for a problem at the current token.
+    ///
+    /// The error is reported as ``AQLDiagnosticCode/unexpectedEnd`` when the current token is
+    /// the end of the input.
+    ///
+    /// - Parameters:
+    ///   - message: What is wrong.
+    ///   - code: The diagnostic code (default: ``AQLDiagnosticCode/unexpectedToken``).
+    /// - Returns: The error, positioned at the current token.
+    public func syntaxError(
+        _ message: String, code: String = AQLDiagnosticCode.unexpectedToken
+    ) -> AQLSyntaxError {
+        AQLSyntaxError(
+            AQLDiagnostic(
+                code: currentKind == .eof ? AQLDiagnosticCode.unexpectedEnd : code,
+                message: message, span: errorSpan))
+    }
+
+    /// Consumes a token of the given kind.
+    ///
+    /// - Parameter kind: The kind of token that must be current.
+    /// - Throws: ``AQLSyntaxError`` at the current token if it is of another kind.
+    public mutating func expect(_ kind: AQLTokenKind) throws {
+        guard currentKind == kind else {
+            throw syntaxError("Expected \(kind) but found \(currentKind)")
+        }
+        advance()
+    }
 }

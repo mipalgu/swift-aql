@@ -23,23 +23,14 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
 
     /// Builds the error for a problem at the current token.
     ///
-    /// - Parameters:
-    ///   - message: What is wrong.
-    ///   - code: The diagnostic code (default: unexpected token).
-    func error(_ message: String, code: String = AQLDiagnosticCode.unexpectedToken) -> AQLSyntaxError {
-        let atEnd = cursor.currentKind == .eof
-        return AQLSyntaxError(
-            AQLDiagnostic(
-                code: atEnd ? AQLDiagnosticCode.unexpectedEnd : code, message: message,
-                span: cursor.errorSpan))
+    /// - Parameter message: What is wrong.
+    func error(_ message: String) -> AQLSyntaxError {
+        cursor.syntaxError(message)
     }
 
     /// Consumes a token of the given kind.
     mutating func expect(_ kind: AQLTokenKind) throws {
-        guard cursor.currentKind == kind else {
-            throw error("Expected \(kind) but found \(cursor.currentKind)")
-        }
-        cursor.advance()
+        try cursor.expect(kind)
     }
 
     /// Consumes the given keyword.

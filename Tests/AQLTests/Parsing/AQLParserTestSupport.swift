@@ -53,12 +53,7 @@ struct HostProbeDelegate: AQLParserDelegate {
         cursor.advance()
         cursor.advance()
         let setName = try AQLParser.parseExpression(&cursor, delegate: &self)
-        guard cursor.currentKind == .rightParen else {
-            throw AQLSyntaxError(
-                AQLDiagnostic(
-                    code: AQLDiagnosticCode.unexpectedToken, message: "Expected ')'", span: cursor.errorSpan))
-        }
-        cursor.advance()
+        try cursor.expect(.rightParen)
         return CollectedProbe(setName: setName)
     }
 }
