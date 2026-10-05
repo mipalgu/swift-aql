@@ -1,0 +1,125 @@
+//
+//  AQLToken.swift
+//  AQL
+//
+//  Created by Rene Hexel on 5/10/2026.
+//  Copyright (c) 2026 Rene Hexel. All rights reserved.
+//
+
+/// The kinds of token in AQL text.
+///
+/// The cases beyond the AQL grammar itself (brackets and ``other``) exist so that a host
+/// language that embeds AQL expressions can present its own tokens to the parser.
+public enum AQLTokenKind: Sendable, Equatable, Hashable {
+    /// `(`
+    case leftParen
+    /// `)`
+    case rightParen
+    /// `,`
+    case comma
+    /// `:`
+    case colon
+    /// `::`
+    case doubleColon
+    /// `.`
+    case dot
+    /// `|`
+    case pipe
+    /// `?`
+    case questionMark
+    /// `{`
+    case leftBrace
+    /// `}`
+    case rightBrace
+    /// `[`, which AQL itself does not use
+    case leftBracket
+    /// `]`, which AQL itself does not use
+    case rightBracket
+    /// `/`, which divides unless the host says that it ends the expression
+    case slash
+    /// A reserved word, see ``AQLSyntax/keywords``.
+    case keyword(String)
+    /// A name.
+    case identifier(String)
+    /// A string literal with its escapes resolved.
+    case stringLiteral(String)
+    /// An integer literal.
+    case integerLiteral(Int)
+    /// A real literal.
+    case realLiteral(Double)
+    /// `true` or `false`.
+    case booleanLiteral(Bool)
+    /// An arithmetic, comparison, or arrow operator.
+    case `operator`(String)
+    /// A comment without its prefix, trimmed of surrounding blanks.
+    case comment(String)
+    /// Text that is not a valid token, as written.
+    case invalid(String)
+    /// A token of the host language that AQL does not interpret.
+    case other
+    /// The end of the text.
+    case eof
+}
+
+extension AQLTokenKind: CustomStringConvertible {
+    /// A description of the kind of token, for messages.
+    public var description: String {
+        switch self {
+        case .leftParen: return "'('"
+        case .rightParen: return "')'"
+        case .comma: return "','"
+        case .colon: return "':'"
+        case .doubleColon: return "'::'"
+        case .dot: return "'.'"
+        case .pipe: return "'|'"
+        case .questionMark: return "'?'"
+        case .leftBrace: return "'{'"
+        case .rightBrace: return "'}'"
+        case .leftBracket: return "'['"
+        case .rightBracket: return "']'"
+        case .slash: return "'/'"
+        case .keyword(let word): return "keyword '\(word)'"
+        case .identifier(let name): return "name '\(name)'"
+        case .stringLiteral: return "string literal"
+        case .integerLiteral(let value): return "number \(value)"
+        case .realLiteral(let value): return "number \(value)"
+        case .booleanLiteral(let value): return "'\(value)'"
+        case .operator(let text): return "'\(text)'"
+        case .comment: return "comment"
+        case .invalid(let text): return "invalid text '\(text)'"
+        case .other: return "unexpected text"
+        case .eof: return "end of input"
+        }
+    }
+}
+
+/// A token of AQL text with its position.
+public struct AQLToken: Sendable, Equatable, Hashable {
+    /// What the token is.
+    public var kind: AQLTokenKind
+
+    /// Where the token is.
+    public var span: AQLSourceSpan
+
+    /// Creates a token.
+    ///
+    /// - Parameters:
+    ///   - kind: What the token is.
+    ///   - span: Where the token is.
+    public init(kind: AQLTokenKind, span: AQLSourceSpan) {
+        self.kind = kind
+        self.span = span
+    }
+
+    /// Whether the token is a comment.
+    public var isComment: Bool {
+        if case .comment = kind { return true }
+        return false
+    }
+
+    /// Whether the token is not valid AQL.
+    public var isInvalid: Bool {
+        if case .invalid = kind { return true }
+        return false
+    }
+}
