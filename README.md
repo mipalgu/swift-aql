@@ -44,6 +44,16 @@ arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
 
 `AQLParser().parse(_:)` reads one AQL expression from text and returns the expression, the diagnostics (`SourceDiagnostic` values with ranges and the codes of `AQLDiagnosticCode`) and the tokens. Host languages that embed AQL read their own tokens through an `AQLTokenCursor` and shape the nodes through an `AQLParserDelegate`. `AQLSyntax.tokens(in:)` splits text into highlighting tokens and never fails. Every expression node carries an `origin` (its range in the source text) that never takes part in equality, and `AQLTreePrinter` prints a tree as one deterministic line.
 
+## Unset Features
+
+As in the Eclipse Modeling Framework, navigating an unset feature yields its default:
+the declared default value or the default of its data type (`false`, zero, the first
+enumeration literal) for single-valued attributes, and an empty collection for many-valued
+features. Unset strings without a declared default, dates, arbitrary-precision numbers and
+single-valued references yield `null`. Create a context with
+`AQLExecutionContext(unsetFeatureReads: .undefined)` to read every unset feature as `null`
+instead.
+
 ## Requirements
 
 - Swift 6.0 or later

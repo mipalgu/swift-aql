@@ -86,6 +86,26 @@ public final class AQLExecutionContext: Sendable {
         self.services = registry
     }
 
+    /// Creates a new AQL execution context with an execution engine of its own.
+    ///
+    /// The context creates an ``ECoreExecutionEngine`` without registered models, which suits
+    /// expressions that only navigate the objects bound to their variables. Unless told
+    /// otherwise, the engine reads an unset feature as its default value, as the Eclipse
+    /// Modeling Framework does; pass ``UnsetFeatureReads/undefined`` to read unset features
+    /// as `nil` instead.
+    ///
+    /// - Parameters:
+    ///   - unsetFeatureReads: How navigation reads features that have not been set.
+    ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    public convenience init(
+        unsetFeatureReads: UnsetFeatureReads = .defaults,
+        serviceProviders: [any AQLServiceProvider] = []
+    ) {
+        self.init(
+            executionEngine: ECoreExecutionEngine(models: [:], unsetFeatureReads: unsetFeatureReads),
+            serviceProviders: serviceProviders)
+    }
+
     // MARK: - Services
 
     /// Registers a service provider.

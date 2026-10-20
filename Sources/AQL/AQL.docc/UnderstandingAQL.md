@@ -246,6 +246,32 @@ self.package.name
 if self.package.oclIsUndefined() then 'default' else self.package.name endif
 ```
 
+## Unset Features
+
+Navigating a feature that has not been set yields what the Eclipse Modeling Framework's
+`eGet` yields, both for dot navigation and for the `eGet` service:
+
+- An unset single-valued attribute reads as its declared default value or, without one, as
+  the default of its data type: `false` for booleans, zero for numbers, and the first literal
+  of an enumeration. An unset `isAbstract` flag is therefore `false`, so `not self.isAbstract`
+  is `true`.
+- An unset many-valued attribute or reference reads as an empty collection, so `->size()` is
+  zero and `oclIsUndefined()` is `false`.
+- An unset string attribute without a declared default, and an unset single-valued
+  reference, read as `null`, so `oclIsUndefined()` is `true`.
+
+To find out whether a feature has been set, select the non-standard undefined mode, in which
+every unset feature reads as `null`. Pass it when creating a context, or switch the engine of
+an existing context:
+
+```swift
+// A new context whose own engine reads unset features as null
+let context = AQLExecutionContext(unsetFeatureReads: .undefined)
+
+// An existing context switched to the same mode
+await existingContext.executionEngine.setUnsetFeatureReads(.undefined)
+```
+
 ## Evaluation Order
 
 1. **Literals and variables** are evaluated first

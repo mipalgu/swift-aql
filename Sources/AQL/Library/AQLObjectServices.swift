@@ -83,7 +83,10 @@ public struct AQLObjectServices: AQLServiceProvider {
                 do {
                     return try await call.context.navigate(from: object, property: name)
                 } catch {
-                    if let dynamic = object as? DynamicEObject { return dynamic.eGet(name) }
+                    if let dynamic = object as? DynamicEObject {
+                        let readsDefaults = await call.context.executionEngine.unsetFeatureReads == .defaults
+                        return readsDefaults ? dynamic.eGetWithDefault(name) : dynamic.eGet(name)
+                    }
                     throw error
                 }
             },
