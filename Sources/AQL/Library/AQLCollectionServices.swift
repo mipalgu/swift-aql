@@ -17,6 +17,11 @@ import Foundation
 /// `lastIndexOf`); `indexOf` and `lastIndexOf` return 0 when the element is absent. Clearing
 /// ``AQLExecutionContext/usesOneBasedIndexOf`` makes those two 0-based (-1 if absent) instead.
 ///
+/// `including`, `append`, `prepend` and `insertAt` add their argument as one element, so a
+/// collection argument becomes a nested collection. Kinds are not distinguished at run time, so
+/// every receiver behaves as a sequence: `including` and `append` never move or deduplicate an
+/// element already present, and a null argument adds nothing.
+///
 /// Queries: `size`, `isEmpty`, `notEmpty`, `first`, `last`, `at`, `indexOf`, `lastIndexOf`,
 /// `includes` (`contains`), `excludes`, `includesAll`, `excludesAll`, `count`, `sum`, `min`, `max`,
 /// `isUnique`, `one`, `exists`, `forAll`, `any`.
@@ -51,6 +56,14 @@ public struct AQLCollectionServices: AQLServiceProvider {
             if isTrue(try await evaluate(call, element)) == keeping { result.append(element) }
         }
         return EcoreValueArray(result)
+    }
+
+    /// The argument of an element-adding service as at most one element.
+    ///
+    /// A collection argument is kept whole (as a nested collection); null adds nothing, as
+    /// collections cannot hold null.
+    private static func single(_ value: (any EcoreValue)?) -> [any EcoreValue] {
+        value.map { [$0] } ?? []
     }
 
     private static func position(of value: (any EcoreValue)?, in items: [any EcoreValue], last: Bool) -> Int? {
@@ -242,14 +255,11 @@ public struct AQLCollectionServices: AQLServiceProvider {
         }
 
         // Transformations
-        add(["including"], arity: 1...1) { call in
-            EcoreValueArray(call.receiverElements() + AQLValues.coerceToCollection(call.argument(0)).prefix(1))
-        }
-        add(["append"], arity: 1...1) { call in
-            EcoreValueArray(call.receiverElements() + AQLValues.coerceToCollection(call.argument(0)).prefix(1))
+        add(["including", "append"], arity: 1...1) { call in
+            EcoreValueArray(call.receiverElements() + Self.single(call.argument(0)))
         }
         add(["prepend"], arity: 1...1) { call in
-            EcoreValueArray(Array(AQLValues.coerceToCollection(call.argument(0)).prefix(1)) + call.receiverElements())
+            EcoreValueArray(Self.single(call.argument(0)) + call.receiverElements())
         }
         add(["excluding"], arity: 1...1) { call in
             EcoreValueArray(call.receiverElements().filter { !AQLValues.areEqual($0, call.argument(0)) })
