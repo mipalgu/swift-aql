@@ -63,6 +63,25 @@ self.name.substring(0, 5)              -- Operation with arguments
 
 Collections are central to AQL. Operations use the `->` arrow syntax.
 
+### Collection Kinds
+
+A collection is a `Sequence`, an `OrderedSet`, a `Set` or a `Bag`, as written in
+its literal (`OrderedSet{'a', 'b'}`) or produced by `asSequence()`, `asOrderedSet()`,
+`asSet()` or `asBag()`. All kinds keep their elements in order. Ordered sets and sets
+hold each element at most once; sequences and bags may repeat elements. Calling an
+arrow operation on a single value treats it as a set holding that value.
+
+Operations such as `select`, `collect`, `sortedBy`, `union` and `including` return a
+collection of the same kind as the one they are called on. Adding an element that an
+ordered set or a set already holds does not repeat it:
+
+```aql
+OrderedSet{'a', 'b', 'c'}->including('b')   -- OrderedSet{'a', 'b', 'c'}
+OrderedSet{'a', 'b', 'c'}->append('b')      -- OrderedSet{'a', 'c', 'b'}
+OrderedSet{'a', 'b', 'c'}->prepend('b')     -- OrderedSet{'b', 'a', 'c'}
+Sequence{'a', 'b', 'c'}->append('b')        -- Sequence{'a', 'b', 'c', 'b'}
+```
+
 ### Basic Operations
 
 | Operation | Description | Example |

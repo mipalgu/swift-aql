@@ -9,18 +9,28 @@ import ECore
 import EMFBase
 import Foundation
 
-/// The AQL collection library (sequences and ordered sets).
+/// The AQL collection library (sequences, ordered sets, sets and bags).
 ///
 /// The `.` and `->` call forms reach the same implementations. Collections are held as
-/// `EcoreValueArray`; sets are ordered and duplicate free (see `asSet`, `union`).
-/// Positions are 1-based as in AQL (`at`, `insertAt`, `subSequence`, `subOrderedSet`, `indexOf`,
-/// `lastIndexOf`); `indexOf` and `lastIndexOf` return 0 when the element is absent. Clearing
-/// ``AQLExecutionContext/usesOneBasedIndexOf`` makes those two 0-based (-1 if absent) instead.
+/// `EcoreValueArray` and carry their ``EcoreCollectionKind``. Every kind keeps its elements in
+/// order; ordered sets and sets hold each element at most once, sequences and bags may repeat
+/// elements. An arrow call on a value that is not a collection sees a set holding that value
+/// (an empty set for null). Positions are 1-based as in AQL (`at`, `insertAt`, `subSequence`,
+/// `subOrderedSet`, `indexOf`, `lastIndexOf`); `indexOf` and `lastIndexOf` return 0 when the
+/// element is absent. Clearing ``AQLExecutionContext/usesOneBasedIndexOf`` makes those two
+/// 0-based (-1 if absent) instead.
+///
+/// Transformations yield a collection of the receiver's kind, so that, for example, selecting
+/// from or collecting over an ordered set yields an ordered set. The exceptions are the
+/// conversions (`asSequence`, `asOrderedSet`, `asSet`, `asBag`), which yield their named kind,
+/// `sep`, which yields a sequence, and `closure`, which yields an ordered set for an ordered
+/// receiver and a set otherwise. `union` leaves out repeated elements for every kind.
 ///
 /// `including`, `append`, `prepend` and `insertAt` add their argument as one element, so a
-/// collection argument becomes a nested collection. Kinds are not distinguished at run time, so
-/// every receiver behaves as a sequence: `including` and `append` never move or deduplicate an
-/// element already present, and a null argument adds nothing.
+/// collection argument becomes a nested collection, and a null argument adds nothing. A sequence
+/// or bag gains the element even if it already holds an equal one. For an ordered set or a set,
+/// `including` keeps an element already present where it is, while `append`, `prepend` and
+/// `insertAt` move it to the end, the front or the given position, respectively.
 ///
 /// Queries: `size`, `isEmpty`, `notEmpty`, `first`, `last`, `at`, `indexOf`, `lastIndexOf`,
 /// `includes` (`contains`), `excludes`, `includesAll`, `excludesAll`, `count`, `sum`, `min`, `max`,
@@ -49,13 +59,18 @@ public struct AQLCollectionServices: AQLServiceProvider {
         try await call.lambda(0).invoke(element, in: call.context)
     }
 
+    /// The elements as a collection of the kind of the call's receiver.
+    private static func result(_ items: [any EcoreValue], of call: AQLServiceCall) -> EcoreValueArray {
+        AQLValues.collection(items, kind: call.receiverKind)
+    }
+
     @MainActor
     private static func filter(_ call: AQLServiceCall, keeping: Bool) async throws -> EcoreValueArray {
         var result: [any EcoreValue] = []
         for element in call.receiverElements() {
             if isTrue(try await evaluate(call, element)) == keeping { result.append(element) }
         }
-        return EcoreValueArray(result)
+        return Self.result(result, of: call)
     }
 
     /// The argument of an element-adding service as at most one element.
@@ -104,7 +119,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
         let lower = try call.integer(0)
         let upper = try call.integer(1)
         guard lower >= 1, lower <= upper, upper <= items.count else { return nil }
-        return EcoreValueArray(Array(items[(lower - 1)..<upper]))
+        return result(Array(items[(lower - 1)..<upper]), of: call)
     }
 
     // MARK: - Services
@@ -186,7 +201,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
                 guard let value = try await Self.evaluate(call, element) else { continue }
                 result.append(contentsOf: AQLValues.elements(of: value) ?? [value])
             }
-            return EcoreValueArray(result)
+            return Self.result(result, of: call)
         }
         add(["any"], arity: 1...1) { call in
             for element in call.receiverElements() where Self.isTrue(try await Self.evaluate(call, element)) {
@@ -234,7 +249,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
                 }
                 return lhs.offset < rhs.offset
             }
-            return EcoreValueArray(ordered.map(\.element.element))
+            return Self.result(ordered.map(\.element.element), of: call)
         }
         add(["closure"], arity: 1...1) { call in
             var result: [any EcoreValue] = []
@@ -247,53 +262,65 @@ public struct AQLCollectionServices: AQLServiceProvider {
                     pending.append(next)
                 }
             }
-            return EcoreValueArray(result)
+            let kind = EcoreCollectionKind(ordered: call.receiverKind.isOrdered, unique: true)
+            return AQLValues.collection(result, kind: kind)
         }
         add(["filter"], arity: 1...1, types: true) { call in
             let type = try call.type(0)
-            return EcoreValueArray(call.receiverElements().filter(type.isKind))
+            return Self.result(call.receiverElements().filter(type.isKind), of: call)
         }
 
         // Transformations
-        add(["including", "append"], arity: 1...1) { call in
-            EcoreValueArray(call.receiverElements() + Self.single(call.argument(0)))
+        add(["including"], arity: 1...1) { call in
+            Self.result(call.receiverElements() + Self.single(call.argument(0)), of: call)
+        }
+        add(["append"], arity: 1...1) { call in
+            let added = Self.single(call.argument(0))
+            var items = call.receiverElements()
+            if call.receiverKind.isUnique { items.removeAll { Self.contains(added, $0) } }
+            return Self.result(items + added, of: call)
         }
         add(["prepend"], arity: 1...1) { call in
-            EcoreValueArray(Self.single(call.argument(0)) + call.receiverElements())
+            Self.result(Self.single(call.argument(0)) + call.receiverElements(), of: call)
         }
         add(["excluding"], arity: 1...1) { call in
-            EcoreValueArray(call.receiverElements().filter { !AQLValues.areEqual($0, call.argument(0)) })
+            Self.result(call.receiverElements().filter { !AQLValues.areEqual($0, call.argument(0)) }, of: call)
         }
         add(["union"], arity: 1...1) { call in
-            EcoreValueArray(AQLValues.distinct(call.receiverElements() + call.elements(0)))
+            Self.result(AQLValues.distinct(call.receiverElements() + call.elements(0)), of: call)
         }
         add(["concat", "addAll", "+"], arity: 1...1) { call in
-            EcoreValueArray(call.receiverElements() + call.elements(0))
+            Self.result(call.receiverElements() + call.elements(0), of: call)
         }
         add(["intersection"], arity: 1...1) { call in
             let other = call.elements(0)
-            return EcoreValueArray(call.receiverElements().filter { Self.contains(other, $0) })
+            return Self.result(call.receiverElements().filter { Self.contains(other, $0) }, of: call)
         }
         add(["sub", "difference", "removeAll"], arity: 1...1) { call in
             let other = call.elements(0)
-            return EcoreValueArray(call.receiverElements().filter { !Self.contains(other, $0) })
+            return Self.result(call.receiverElements().filter { !Self.contains(other, $0) }, of: call)
         }
         add(["insertAt"], arity: 2...2) { call in
             var items = call.receiverElements()
             let position = try call.integer(0)
             guard position >= 1, position <= items.count + 1, let value = call.argument(1) else { return nil }
-            items.insert(value, at: position - 1)
-            return EcoreValueArray(items)
+            if call.receiverKind.isUnique { items.removeAll { AQLValues.areEqual($0, value) } }
+            items.insert(value, at: Swift.min(position - 1, items.count))
+            return Self.result(items, of: call)
         }
-        add(["reverse"]) { EcoreValueArray($0.receiverElements().reversed()) }
-        add(["flatten"]) { EcoreValueArray(Self.flattened($0.receiverElements())) }
-        add(["asSet", "asOrderedSet"]) { EcoreValueArray(AQLValues.distinct($0.receiverElements())) }
-        add(["asSequence", "asBag"]) { EcoreValueArray($0.receiverElements()) }
+        add(["reverse"]) { Self.result($0.receiverElements().reversed(), of: $0) }
+        add(["flatten"]) { Self.result(Self.flattened($0.receiverElements()), of: $0) }
+        let conversions: [(String, EcoreCollectionKind)] = [
+            ("asSequence", .sequence), ("asOrderedSet", .orderedSet), ("asSet", .set), ("asBag", .bag),
+        ]
+        for (name, kind) in conversions {
+            add([name]) { AQLValues.collection($0.receiverElements(), kind: kind) }
+        }
         add(["drop"], arity: 1...1) { call in
-            EcoreValueArray(Array(call.receiverElements().dropFirst(Swift.max(0, try call.integer(0)))))
+            Self.result(Array(call.receiverElements().dropFirst(Swift.max(0, try call.integer(0)))), of: call)
         }
         add(["dropRight"], arity: 1...1) { call in
-            EcoreValueArray(Array(call.receiverElements().dropLast(Swift.max(0, try call.integer(0)))))
+            Self.result(Array(call.receiverElements().dropLast(Swift.max(0, try call.integer(0)))), of: call)
         }
         add(["subSequence", "subOrderedSet"], arity: 2...2) { try Self.slice($0) }
         add(["sep"], arity: 1...1) { call in

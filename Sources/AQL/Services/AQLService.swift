@@ -134,6 +134,14 @@ public struct AQLServiceCall: Sendable {
         AQLValues.coerceToCollection(receiver)
     }
 
+    /// The collection kind of the receiver.
+    ///
+    /// A receiver that is not a collection counts as a sequence; an arrow call has
+    /// already turned such a receiver into a set.
+    public var receiverKind: EcoreCollectionKind {
+        AQLValues.kind(of: receiver) ?? .sequence
+    }
+
     /// The argument at the given position as a string.
     ///
     /// - Parameter index: The zero-based argument position.

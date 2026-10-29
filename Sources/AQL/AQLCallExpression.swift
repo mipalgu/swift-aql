@@ -105,7 +105,7 @@ public struct AQLCallExpression: AQLExpression {
         var argumentExpressions = arguments
 
         if hasReceiver && usesArrow {
-            receiver = AQLValues.collection(AQLValues.coerceToCollection(receiver))
+            receiver = Self.arrowReceiver(receiver)
         }
 
         if !hasReceiver,
@@ -139,6 +139,19 @@ public struct AQLCallExpression: AQLExpression {
         return try await service.invoke(
             AQLServiceCall(
                 name: methodName, receiver: receiver, arguments: argumentValues, context: context))
+    }
+
+    /// The receiver of an arrow call as a collection.
+    ///
+    /// A collection keeps its kind and a native array becomes a sequence. Any other value
+    /// becomes a set holding just that value, and null an empty set.
+    ///
+    /// - Parameter receiver: The evaluated receiver.
+    /// - Returns: The receiver as a collection value.
+    static func arrowReceiver(_ receiver: (any EcoreValue)?) -> EcoreValueArray {
+        if let collection = receiver as? EcoreValueArray { return collection }
+        if let items = AQLValues.elements(of: receiver) { return AQLValues.collection(items) }
+        return AQLValues.collection(AQLValues.coerceToCollection(receiver), kind: .set)
     }
 
     /// Resolves an argument written as a bare identifier to a type descriptor.

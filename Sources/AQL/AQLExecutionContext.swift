@@ -262,7 +262,8 @@ public final class AQLExecutionContext: Sendable {
     ///   - object: Source object
     ///   - property: Property name
     ///
-    /// Collections are navigated element by element and the results flattened. When a derived,
+    /// Collections are navigated element by element and the results flattened into a collection
+    /// of the same kind (so navigating from an ordered set or a set leaves out repeated results). When a derived,
     /// volatile or transient feature of an object has no value (nil or an empty collection), a
     /// client-registered zero-argument service of the same name is called on the object instead,
     /// so that templates can compute such features without writing parentheses.
@@ -277,7 +278,7 @@ public final class AQLExecutionContext: Sendable {
                     collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
                 }
             }
-            return EcoreValueArray(collected)
+            return AQLValues.collection(collected, kind: AQLValues.kind(of: object) ?? .sequence)
         }
         guard let eObject = object as? (any EObject) else {
             // Return nil for nil sources or non-EObject sources (null-safe navigation)
