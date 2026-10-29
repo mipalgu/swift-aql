@@ -43,9 +43,12 @@ let resource = try await xmiParser.parse(URL(fileURLWithPath: "model.xmi"))
 // Create an execution engine with your models
 let engine = ECoreExecutionEngine(models: ["model": resource])
 
-// Create the AQL execution context
-let context = AQLExecutionContext(executionEngine: engine)
+// Create the AQL execution context with the default options
+let context = AQLExecutionContext(executionEngine: engine, options: .standard)
 ```
+
+Pass ``AQLOptions/legacy`` instead to evaluate expressions as version 0.6 did, or set
+individual options of an ``AQLOptions`` value (see <doc:UnderstandingAQL#Options-and-Compatibility-with-0.6>).
 
 ## Parsing and Evaluating Queries
 

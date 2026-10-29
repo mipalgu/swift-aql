@@ -69,7 +69,9 @@ A collection is a `Sequence`, an `OrderedSet`, a `Set` or a `Bag`, as written in
 its literal (`OrderedSet{'a', 'b'}`) or produced by `asSequence()`, `asOrderedSet()`,
 `asSet()` or `asBag()`. All kinds keep their elements in order. Ordered sets and sets
 hold each element at most once; sequences and bags may repeat elements. Calling an
-arrow operation on a single value treats it as a set holding that value.
+arrow operation on a single value treats it as a set holding that value. (These are the
+behaviours of ``AQLOptions/standard``; see
+<doc:UnderstandingAQL#Options-and-Compatibility-with-0.6> for those of version 0.6.)
 
 Operations such as `select`, `collect`, `sortedBy`, `union` and `including` return a
 collection of the same kind as the one they are called on. Adding an element that an
@@ -285,11 +287,51 @@ an existing context:
 
 ```swift
 // A new context whose own engine reads unset features as null
-let context = AQLExecutionContext(unsetFeatureReads: .undefined)
+let context = AQLExecutionContext(options: .standard, unsetFeatureReads: .undefined)
 
 // An existing context switched to the same mode
 await existingContext.executionEngine.setUnsetFeatureReads(.undefined)
 ```
+
+## Options and Compatibility with 0.6
+
+An ``AQLExecutionContext`` evaluates expressions with the ``AQLOptions`` in its
+``AQLExecutionContext/options`` property. ``AQLOptions/standard`` holds the defaults and
+``AQLOptions/legacy`` the behaviours of version 0.6. Contexts created with the
+initialisers of version 0.6, ``AQLExecutionContext/init(executionEngine:serviceProviders:)``
+and ``AQLExecutionContext/init(unsetFeatureReads:serviceProviders:)``, use
+``AQLOptions/legacy``; those initialisers are deprecated in favour of
+``AQLExecutionContext/init(executionEngine:options:serviceProviders:)`` and
+``AQLExecutionContext/init(options:unsetFeatureReads:serviceProviders:)``. Each option
+can be set on its own:
+
+| Option | Default | Version 0.6 |
+|--|--|--|
+| ``AQLOptions/collectionArguments`` | ``AQLCollectionArguments/whole`` | ``AQLCollectionArguments/firstElement`` |
+| ``AQLOptions/collectionKinds`` | ``AQLCollectionKinds/distinguished`` | ``AQLCollectionKinds/sequences`` |
+| ``AQLOptions/singleValueCollections`` | ``AQLSingleValueCollections/set`` | ``AQLSingleValueCollections/sequence`` |
+| ``AQLOptions/containerLookup`` | ``AQLContainerLookup/resources`` | ``AQLContainerLookup/registeredObjects`` |
+
+The options make these differences:
+
+```aql
+Sequence{'a'}->append(Sequence{'b', 'c'})
+    -- whole:          Sequence{'a', Sequence{'b', 'c'}}
+    -- first-element:  Sequence{'a', 'b'}
+OrderedSet{'a', 'b', 'c'}->append('b')
+    -- distinguished:  OrderedSet{'a', 'c', 'b'}
+    -- sequences:      Sequence{'a', 'b', 'c', 'b'}
+'a'->including('a')
+    -- set:            Set{'a'}
+    -- sequence:       Sequence{'a', 'a'}
+```
+
+With ``AQLContainerLookup/resources``, `eContainer()`, `ancestors()` and the sibling
+services ask the registered resources for containers, which also finds the containers of
+nested metamodel contents such as the class of an attribute; when several objects claim
+the same object, the first resource that knows a container answers. With
+``AQLContainerLookup/registeredObjects``, as in version 0.6, containers are found among
+the objects that the resources list, and the last claim found wins.
 
 ## Evaluation Order
 

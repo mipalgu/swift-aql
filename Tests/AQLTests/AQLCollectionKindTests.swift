@@ -40,7 +40,7 @@ struct AQLCollectionKindTests {
     // MARK: Support
 
     /// Parses and evaluates AQL text in the given context.
-    static func value(of source: String, in context: AQLExecutionContext = makeContext()) async throws
+    static func value(of source: String, in context: AQLExecutionContext = makeContext(options: .standard)) async throws
         -> (any EcoreValue)?
     {
         let parsed = AQLParser().parse(source)
@@ -279,7 +279,7 @@ struct AQLCollectionKindTests {
         let receiver = EcoreValueArray(["a"], kind: kind)
         let result = try await AQLCallExpression(
             source: lit(receiver), methodName: "reverse", arguments: [], usesArrow: true
-        ).evaluate(in: makeContext())
+        ).evaluate(in: makeContext(options: .standard))
         #expect(Self.kind(result) == kind)
     }
 
@@ -287,7 +287,7 @@ struct AQLCollectionKindTests {
     func nativeArray() async throws {
         let result = try await AQLCallExpression(
             source: lit(["a", "a"]), methodName: "including", arguments: [lit("a")], usesArrow: true
-        ).evaluate(in: makeContext())
+        ).evaluate(in: makeContext(options: .standard))
         #expect(Self.kind(result) == .sequence)
         #expect(AQLValues.elements(of: result)?.count == 3)
     }
@@ -308,7 +308,7 @@ struct AQLCollectionKindTests {
 
     @Test("Navigating from a collection keeps its kind and uniqueness", arguments: EcoreCollectionKind.allCases)
     func navigation(_ kind: EcoreCollectionKind) async throws {
-        let context = Self.namedObjects(in: makeContext())
+        let context = Self.namedObjects(in: makeContext(options: .standard))
         let result = try await Self.value(of: "\(kind.rawValue){x, y}.name", in: context)
         #expect(Self.kind(result) == kind)
         #expect(AQLValues.areEqual(result, kind.isUnique ? seq("n") : seq("n", "n")))

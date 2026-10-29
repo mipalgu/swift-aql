@@ -137,9 +137,12 @@ public struct AQLServiceCall: Sendable {
     /// The collection kind of the receiver.
     ///
     /// A receiver that is not a collection counts as a sequence; an arrow call has
-    /// already turned such a receiver into a set.
+    /// already turned such a receiver into a collection (see
+    /// ``AQLOptions/singleValueCollections``). While ``AQLOptions/collectionKinds`` of the
+    /// context is ``AQLCollectionKinds/sequences``, every receiver counts as a sequence.
+    @MainActor
     public var receiverKind: EcoreCollectionKind {
-        AQLValues.kind(of: receiver) ?? .sequence
+        context.collectionKind(of: receiver)
     }
 
     /// The argument at the given position as a string.

@@ -17,6 +17,11 @@ import OrderedCollections
 /// of computation to the underlying `ECoreExecutionEngine`. AQL focuses on
 /// efficient querying and navigation without side effects.
 ///
+/// The context evaluates expressions with the ``options`` it holds. Contexts created with
+/// ``init(executionEngine:options:serviceProviders:)`` or ``init(options:unsetFeatureReads:serviceProviders:)``
+/// use the options given; contexts created with the initialisers of version 0.6 use
+/// ``AQLOptions/legacy`` so that they keep computing what they computed in that version.
+///
 /// ## Architecture
 ///
 /// - **Coordination**: Handled on `@MainActor`.
@@ -26,7 +31,7 @@ import OrderedCollections
 ///
 /// ```swift
 /// let engine = ECoreExecutionEngine(...)
-/// let context = AQLExecutionContext(executionEngine: engine)
+/// let context = AQLExecutionContext(executionEngine: engine, options: .standard)
 /// context.setVariable("self", value: myObject)
 /// let result = try await expression.evaluate(in: context)
 /// ```
@@ -55,6 +60,16 @@ public final class AQLExecutionContext: Sendable {
     /// The resources searched by services that need the whole model (`eContainer`, `allInstances`, ...).
     public private(set) var resources: [Resource] = []
 
+    /// The options that choose between the current behaviour and that of version 0.6.
+    ///
+    /// Changing ``AQLOptions/containerLookup`` drops the containers cached while
+    /// ``cachesContainmentIndex`` is on.
+    public var options: AQLOptions {
+        didSet {
+            if options.containerLookup != oldValue.containerLookup { invalidateContainmentIndex() }
+        }
+    }
+
     /// Whether `indexOf` and `lastIndexOf` on collections return 1-based positions (0 if absent) as AQL specifies.
     ///
     /// The default (`true`) follows the AQL specification. Set it to `false` to get the earlier
@@ -68,6 +83,8 @@ public final class AQLExecutionContext: Sendable {
     /// container of each object it looks at, so the answers always reflect the current models.
     /// With caching, each object's container is looked up once and reused until the models
     /// may have changed, which saves the lookups when the same objects are queried repeatedly.
+    /// When ``AQLOptions/containerLookup`` is ``AQLContainerLookup/registeredObjects``, the
+    /// containers of all registered objects are found together and reused in the same way.
     ///
     /// The cache is dropped when a resource is added with ``addResource(_:)``, after each call
     /// of a service that declares ``AQLService/modifiesModels``, and when caching is switched
@@ -76,34 +93,60 @@ public final class AQLExecutionContext: Sendable {
     /// by a call of ``invalidateContainmentIndex()``.
     public var cachesContainmentIndex: Bool = false {
         didSet {
-            if !cachesContainmentIndex { cachedContainers = [:] }
+            if !cachesContainmentIndex { invalidateContainmentIndex() }
         }
     }
 
     /// The containers looked up while caching, keyed by child identifier (`nil` for none).
     private var cachedContainers: [EUUID: (any EObject)?] = [:]
 
+    /// The containers found among the registered objects while caching, keyed by child
+    /// identifier.
+    private var containmentIndex: [EUUID: any EObject]?
+
     /// How many times the registered resources have been asked for a container.
     private(set) var containerLookups = 0
 
     // MARK: - Initialisation
 
-    /// Creates a new AQL execution context.
+    /// Creates a new AQL execution context with the given options.
+    ///
+    /// - Parameters:
+    ///   - executionEngine: The ECore execution engine to delegate to.
+    ///   - options: The options to evaluate expressions with, such as ``AQLOptions/standard``.
+    ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    public init(
+        executionEngine: ECoreExecutionEngine,
+        options: AQLOptions,
+        serviceProviders: [any AQLServiceProvider] = []
+    ) {
+        self.executionEngine = executionEngine
+        self.options = options
+        self.services = Self.registry(of: serviceProviders)
+    }
+
+    /// Creates a new AQL execution context that behaves as in version 0.6.
+    ///
+    /// The context evaluates expressions with ``AQLOptions/legacy``.
     ///
     /// - Parameters:
     ///   - executionEngine: The ECore execution engine to delegate to.
     ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    @available(
+        *, deprecated,
+        message: "Use init(executionEngine:options:serviceProviders:); pass options: .legacy to keep the behaviour of version 0.6"
+    )
     public init(
         executionEngine: ECoreExecutionEngine,
         serviceProviders: [any AQLServiceProvider] = []
     ) {
         self.executionEngine = executionEngine
-        var registry = AQLServiceRegistry()
-        for provider in serviceProviders { registry.register(provider) }
-        self.services = registry
+        self.options = .legacy
+        self.services = Self.registry(of: serviceProviders)
     }
 
-    /// Creates a new AQL execution context with an execution engine of its own.
+    /// Creates a new AQL execution context with an execution engine of its own and the given
+    /// options.
     ///
     /// The context creates an ``ECoreExecutionEngine`` without registered models, which suits
     /// expressions that only navigate the objects bound to their variables. Unless told
@@ -112,15 +155,48 @@ public final class AQLExecutionContext: Sendable {
     /// as `nil` instead.
     ///
     /// - Parameters:
+    ///   - options: The options to evaluate expressions with, such as ``AQLOptions/standard``.
     ///   - unsetFeatureReads: How navigation reads features that have not been set.
     ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    public convenience init(
+        options: AQLOptions,
+        unsetFeatureReads: UnsetFeatureReads = .defaults,
+        serviceProviders: [any AQLServiceProvider] = []
+    ) {
+        self.init(
+            executionEngine: ECoreExecutionEngine(models: [:], unsetFeatureReads: unsetFeatureReads),
+            options: options, serviceProviders: serviceProviders)
+    }
+
+    /// Creates a new AQL execution context with an execution engine of its own that behaves
+    /// as in version 0.6.
+    ///
+    /// The context evaluates expressions with ``AQLOptions/legacy``. It creates an
+    /// ``ECoreExecutionEngine`` without registered models, which reads an unset feature as
+    /// its default value unless told otherwise; pass ``UnsetFeatureReads/undefined`` to read
+    /// unset features as `nil` instead.
+    ///
+    /// - Parameters:
+    ///   - unsetFeatureReads: How navigation reads features that have not been set.
+    ///   - serviceProviders: Providers to register immediately (earlier entries have lower precedence).
+    @available(
+        *, deprecated,
+        message: "Use init(options:unsetFeatureReads:serviceProviders:); pass options: .legacy to keep the behaviour of version 0.6"
+    )
     public convenience init(
         unsetFeatureReads: UnsetFeatureReads = .defaults,
         serviceProviders: [any AQLServiceProvider] = []
     ) {
         self.init(
             executionEngine: ECoreExecutionEngine(models: [:], unsetFeatureReads: unsetFeatureReads),
-            serviceProviders: serviceProviders)
+            options: .legacy, serviceProviders: serviceProviders)
+    }
+
+    /// A service registry holding the standard library and the given providers.
+    private static func registry(of providers: [any AQLServiceProvider]) -> AQLServiceRegistry {
+        var registry = AQLServiceRegistry()
+        for provider in providers { registry.register(provider) }
+        return registry
     }
 
     // MARK: - Services
@@ -140,7 +216,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameter resource: The resource holding model objects.
     public func addResource(_ resource: Resource) {
         if !resources.contains(where: { $0 === resource }) { resources.append(resource) }
-        cachedContainers = [:]
+        invalidateContainmentIndex()
     }
 
     /// Resolves an object identifier against the registered resources.
@@ -157,9 +233,25 @@ public final class AQLExecutionContext: Sendable {
     /// Drops the cached containers (see ``cachesContainmentIndex``).
     public func invalidateContainmentIndex() {
         cachedContainers = [:]
+        containmentIndex = nil
     }
 
     /// The object that contains the object with the given identifier.
+    ///
+    /// The container is looked up as ``AQLOptions/containerLookup`` says.
+    ///
+    /// - Parameter id: The identifier of the contained object.
+    /// - Returns: The container, or `nil` if none is found.
+    /// - Throws: Any error raised while reading the contents of registered objects.
+    func container(of id: EUUID) async throws -> (any EObject)? {
+        switch options.containerLookup {
+        case .resources: return await resourceContainer(of: id)
+        case .registeredObjects: return try await registeredParents()[id]
+        }
+    }
+
+    /// The object that a registered resource knows to contain the object with the given
+    /// identifier.
     ///
     /// The registered resources are asked in the order they were added, and the first one
     /// that knows a container answers.
@@ -167,7 +259,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameter id: The identifier of the contained object.
     /// - Returns: The container, or `nil` if no registered resource holds the object in a
     ///   containment reference.
-    func container(of id: EUUID) async -> (any EObject)? {
+    private func resourceContainer(of id: EUUID) async -> (any EObject)? {
         if cachesContainmentIndex, let cached = cachedContainers[id] { return cached }
         containerLookups += 1
         var found: (any EObject)?
@@ -179,6 +271,58 @@ public final class AQLExecutionContext: Sendable {
         }
         if cachesContainmentIndex { cachedContainers[id] = .some(found) }
         return found
+    }
+
+    /// The container of every object claimed by a registered object, keyed by the
+    /// identifier of the contained object.
+    ///
+    /// The objects that the registered resources list are searched in resource order, and
+    /// the last claim on an object wins.
+    ///
+    /// - Returns: The containers of all objects held in containment references of the
+    ///   registered objects.
+    /// - Throws: Any error raised while reading the contents of registered objects.
+    private func registeredParents() async throws -> [EUUID: any EObject] {
+        if cachesContainmentIndex, let containmentIndex { return containmentIndex }
+        var index: [EUUID: any EObject] = [:]
+        for resource in resources {
+            for object in await resource.getAllObjects() {
+                for child in try await AQLObjectServices.contents(of: object, in: self) {
+                    if let child = child as? any EObject { index[child.id] = object }
+                }
+            }
+        }
+        if cachesContainmentIndex { containmentIndex = index }
+        return index
+    }
+
+    // MARK: - Collections
+
+    /// The collection kind that operations on a value keep.
+    ///
+    /// - Parameter value: The value to inspect.
+    /// - Returns: The kind of a collection value while ``AQLOptions/collectionKinds`` is
+    ///   ``AQLCollectionKinds/distinguished``, otherwise, and for a value that is not a
+    ///   collection, ``EcoreCollectionKind/sequence``.
+    func collectionKind(of value: (any EcoreValue)?) -> EcoreCollectionKind {
+        guard options.collectionKinds == .distinguished else { return .sequence }
+        return AQLValues.kind(of: value) ?? .sequence
+    }
+
+    /// Creates a collection of the given kind as the options of this context say.
+    ///
+    /// For an ordered set or a set, an element equal to an earlier one is left out. While
+    /// ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``, the collection
+    /// created is a sequence.
+    ///
+    /// - Parameters:
+    ///   - elements: The elements.
+    ///   - kind: The kind of collection to create.
+    /// - Returns: The collection value.
+    func collection(_ elements: [any EcoreValue], kind: EcoreCollectionKind) -> EcoreValueArray {
+        let collection = AQLValues.collection(elements, kind: kind)
+        guard options.collectionKinds == .sequences else { return collection }
+        return AQLValues.collection(collection.values)
     }
 
     // MARK: - Variable Management
@@ -267,7 +411,8 @@ public final class AQLExecutionContext: Sendable {
     ///   - property: Property name
     ///
     /// Collections are navigated element by element and the results flattened into a collection
-    /// of the same kind (so navigating from an ordered set or a set leaves out repeated results). When a derived,
+    /// of the same kind (so navigating from an ordered set or a set leaves out repeated results,
+    /// unless ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``). When a derived,
     /// volatile or transient feature of an object has no value (nil or an empty collection), a
     /// client-registered zero-argument service of the same name is called on the object instead,
     /// so that templates can compute such features without writing parentheses.
@@ -282,7 +427,7 @@ public final class AQLExecutionContext: Sendable {
                     collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
                 }
             }
-            return AQLValues.collection(collected, kind: AQLValues.kind(of: object) ?? .sequence)
+            return collection(collected, kind: collectionKind(of: object))
         }
         guard let eObject = object as? (any EObject) else {
             // Return nil for nil sources or non-EObject sources (null-safe navigation)

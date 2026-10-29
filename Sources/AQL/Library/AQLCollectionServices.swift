@@ -27,10 +27,17 @@ import Foundation
 /// receiver and a set otherwise. `union` leaves out repeated elements for every kind.
 ///
 /// `including`, `append`, `prepend` and `insertAt` add their argument as one element, so a
-/// collection argument becomes a nested collection, and a null argument adds nothing. A sequence
+/// collection argument becomes a nested collection, and a null argument adds nothing. With
+/// ``AQLCollectionArguments/firstElement`` as the ``AQLOptions/collectionArguments`` of the
+/// context, `including`, `append` and `prepend` add only the first element of a collection
+/// argument instead. A sequence
 /// or bag gains the element even if it already holds an equal one. For an ordered set or a set,
 /// `including` keeps an element already present where it is, while `append`, `prepend` and
 /// `insertAt` move it to the end, the front or the given position, respectively.
+///
+/// While the ``AQLOptions/collectionKinds`` of the context are
+/// ``AQLCollectionKinds/sequences``, every collection behaves as, and every result is, a
+/// sequence; `asOrderedSet` and `asSet` still leave out repeated elements.
 ///
 /// Queries: `size`, `isEmpty`, `notEmpty`, `first`, `last`, `at`, `indexOf`, `lastIndexOf`,
 /// `includes` (`contains`), `excludes`, `includesAll`, `excludesAll`, `count`, `sum`, `min`, `max`,
@@ -60,8 +67,9 @@ public struct AQLCollectionServices: AQLServiceProvider {
     }
 
     /// The elements as a collection of the kind of the call's receiver.
+    @MainActor
     private static func result(_ items: [any EcoreValue], of call: AQLServiceCall) -> EcoreValueArray {
-        AQLValues.collection(items, kind: call.receiverKind)
+        call.context.collection(items, kind: call.receiverKind)
     }
 
     @MainActor
@@ -75,10 +83,16 @@ public struct AQLCollectionServices: AQLServiceProvider {
 
     /// The argument of an element-adding service as at most one element.
     ///
-    /// A collection argument is kept whole (as a nested collection); null adds nothing, as
-    /// collections cannot hold null.
-    private static func single(_ value: (any EcoreValue)?) -> [any EcoreValue] {
-        value.map { [$0] } ?? []
+    /// A collection argument is kept whole (as a nested collection), or reduced to its first
+    /// element, as the ``AQLOptions/collectionArguments`` of the context say; null adds
+    /// nothing, as collections cannot hold null.
+    @MainActor
+    private static func single(_ call: AQLServiceCall) -> [any EcoreValue] {
+        let value = call.argument(0)
+        switch call.context.options.collectionArguments {
+        case .whole: return value.map { [$0] } ?? []
+        case .firstElement: return Array(AQLValues.coerceToCollection(value).prefix(1))
+        }
     }
 
     private static func position(of value: (any EcoreValue)?, in items: [any EcoreValue], last: Bool) -> Int? {
@@ -114,6 +128,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
         return allIntegers ? best : AQLValues.numericValue(best)
     }
 
+    @MainActor
     private static func slice(_ call: AQLServiceCall) throws -> EcoreValueArray? {
         let items = call.receiverElements()
         let lower = try call.integer(0)
@@ -263,7 +278,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
                 }
             }
             let kind = EcoreCollectionKind(ordered: call.receiverKind.isOrdered, unique: true)
-            return AQLValues.collection(result, kind: kind)
+            return call.context.collection(result, kind: kind)
         }
         add(["filter"], arity: 1...1, types: true) { call in
             let type = try call.type(0)
@@ -272,16 +287,16 @@ public struct AQLCollectionServices: AQLServiceProvider {
 
         // Transformations
         add(["including"], arity: 1...1) { call in
-            Self.result(call.receiverElements() + Self.single(call.argument(0)), of: call)
+            Self.result(call.receiverElements() + Self.single(call), of: call)
         }
         add(["append"], arity: 1...1) { call in
-            let added = Self.single(call.argument(0))
+            let added = Self.single(call)
             var items = call.receiverElements()
             if call.receiverKind.isUnique { items.removeAll { Self.contains(added, $0) } }
             return Self.result(items + added, of: call)
         }
         add(["prepend"], arity: 1...1) { call in
-            Self.result(Self.single(call.argument(0)) + call.receiverElements(), of: call)
+            Self.result(Self.single(call) + call.receiverElements(), of: call)
         }
         add(["excluding"], arity: 1...1) { call in
             Self.result(call.receiverElements().filter { !AQLValues.areEqual($0, call.argument(0)) }, of: call)
@@ -314,7 +329,7 @@ public struct AQLCollectionServices: AQLServiceProvider {
             ("asSequence", .sequence), ("asOrderedSet", .orderedSet), ("asSet", .set), ("asBag", .bag),
         ]
         for (name, kind) in conversions {
-            add([name]) { AQLValues.collection($0.receiverElements(), kind: kind) }
+            add([name]) { $0.context.collection($0.receiverElements(), kind: kind) }
         }
         add(["drop"], arity: 1...1) { call in
             Self.result(Array(call.receiverElements().dropFirst(Swift.max(0, try call.integer(0)))), of: call)

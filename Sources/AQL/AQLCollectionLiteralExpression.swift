@@ -13,6 +13,8 @@ import Foundation
 /// Elements keep their runtime values (objects stay objects). Nested
 /// collections are kept as elements, not flattened. The value is a collection
 /// of the literal's kind; ordered sets and sets leave out repeated elements.
+/// While ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``, the
+/// value is a sequence (still without the repeated elements of an ordered set or set).
 public struct AQLCollectionLiteralExpression: AQLExpression {
     /// Where the expression was written, if known.
     public let origin: SourceOrigin
@@ -46,6 +48,6 @@ public struct AQLCollectionLiteralExpression: AQLExpression {
         for element in elements {
             if let value = try await element.evaluate(in: context) { values.append(value) }
         }
-        return AQLValues.collection(values, kind: kind)
+        return context.collection(values, kind: kind)
     }
 }

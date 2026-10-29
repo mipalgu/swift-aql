@@ -56,13 +56,15 @@ struct AQLCollectionAddServicesTests {
 
     @Test("A collection argument is added as a single element", arguments: collectionArguments)
     func collectionArgument(_ test: LibraryCase) async throws {
-        try await check(test)
+        try await check(test, in: makeContext(options: .standard))
     }
 
     @Test("A collection argument is added whole through both call forms", arguments: ["including", "append"])
     func bothCallForms(_ name: String) async throws {
-        let dot = try await evaluate(LibraryCase(Self.abc, name, Self.de, expect: nil))
-        let arrow = try await evaluate(LibraryCase(Self.abc, name, Self.de, expect: nil, arrow: true))
+        let dot = try await evaluate(
+            LibraryCase(Self.abc, name, Self.de, expect: nil), in: makeContext(options: .standard))
+        let arrow = try await evaluate(
+            LibraryCase(Self.abc, name, Self.de, expect: nil, arrow: true), in: makeContext(options: .standard))
         #expect(AQLValues.elements(of: dot)?.count == 4)
         #expect(AQLValues.areEqual(dot, arrow))
     }

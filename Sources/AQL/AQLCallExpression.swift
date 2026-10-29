@@ -105,7 +105,7 @@ public struct AQLCallExpression: AQLExpression {
         var argumentExpressions = arguments
 
         if hasReceiver && usesArrow {
-            receiver = Self.arrowReceiver(receiver)
+            receiver = Self.arrowReceiver(receiver, in: context)
         }
 
         if !hasReceiver,
@@ -144,14 +144,25 @@ public struct AQLCallExpression: AQLExpression {
     /// The receiver of an arrow call as a collection.
     ///
     /// A collection keeps its kind and a native array becomes a sequence. Any other value
-    /// becomes a set holding just that value, and null an empty set.
+    /// becomes a collection holding just that value, and null an empty collection, of the
+    /// kind that ``AQLOptions/singleValueCollections`` names. While
+    /// ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``, the receiver
+    /// becomes a sequence.
     ///
-    /// - Parameter receiver: The evaluated receiver.
+    /// - Parameters:
+    ///   - receiver: The evaluated receiver.
+    ///   - context: The context whose options apply.
     /// - Returns: The receiver as a collection value.
-    static func arrowReceiver(_ receiver: (any EcoreValue)?) -> EcoreValueArray {
+    @MainActor
+    static func arrowReceiver(_ receiver: (any EcoreValue)?, in context: AQLExecutionContext) -> EcoreValueArray {
+        let options = context.options
+        if options.collectionKinds == .sequences {
+            return AQLValues.collection(AQLValues.coerceToCollection(receiver))
+        }
         if let collection = receiver as? EcoreValueArray { return collection }
         if let items = AQLValues.elements(of: receiver) { return AQLValues.collection(items) }
-        return AQLValues.collection(AQLValues.coerceToCollection(receiver), kind: .set)
+        return AQLValues.collection(
+            AQLValues.coerceToCollection(receiver), kind: options.singleValueCollections.kind)
     }
 
     /// Resolves an argument written as a bare identifier to a type descriptor.

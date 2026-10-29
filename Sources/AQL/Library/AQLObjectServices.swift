@@ -17,7 +17,8 @@ import Foundation
 /// `precedingSiblings`, `followingSiblings` and `allInstances`.
 ///
 /// Containment queries that need to look upwards (`eContainer`, `ancestors`, `siblings`,
-/// `eInverse`) search the resources registered with ``AQLExecutionContext/addResource(_:)``.
+/// `eInverse`) search the resources registered with ``AQLExecutionContext/addResource(_:)``,
+/// finding containers as ``AQLOptions/containerLookup`` says.
 public struct AQLObjectServices: AQLServiceProvider {
     /// Creates the provider.
     public init() {}
@@ -98,19 +99,19 @@ public struct AQLObjectServices: AQLServiceProvider {
             try await Self.allContents(of: object, in: call.context)
         }
         list += typed("eContainer") { call, object, type in
-            var current = await call.context.container(of: object.id)
+            var current = try await call.context.container(of: object.id)
             while let container = current {
                 if type?.isKind(container) ?? true { return container }
-                current = await call.context.container(of: container.id)
+                current = try await call.context.container(of: container.id)
             }
             return nil
         }
         list += listed("ancestors") { call, object in
             var result: [any EcoreValue] = []
-            var current = await call.context.container(of: object.id)
+            var current = try await call.context.container(of: object.id)
             while let container = current {
                 result.append(container)
-                current = await call.context.container(of: container.id)
+                current = try await call.context.container(of: container.id)
             }
             return result
         }
@@ -127,7 +128,7 @@ public struct AQLObjectServices: AQLServiceProvider {
         ]
         for (name, select) in siblingServices {
             list += listed(name) { call, object in
-                guard let parent = await call.context.container(of: object.id) else { return [] }
+                guard let parent = try await call.context.container(of: object.id) else { return [] }
                 return select(try await Self.contents(of: parent, in: call.context), object)
             }
         }

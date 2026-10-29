@@ -40,11 +40,68 @@ may be asynchronous and use `call.context` to navigate the model. Iterator
 arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
 (`ecore::EClass`) as `AQLTypeDescriptor` values.
 
+## Options
+
+An `AQLExecutionContext` evaluates expressions with the `AQLOptions` it holds in its
+`options` property. Create a context with `AQLExecutionContext(options:)` (which gives
+the context an execution engine of its own) or
+`AQLExecutionContext(executionEngine:options:)`, passing `.standard` for the current
+behaviour or `.legacy` for that of version 0.6. Each option can also be set on its own:
+
+```swift
+var options = AQLOptions.standard
+options.collectionArguments = .firstElement
+let context = AQLExecutionContext(options: options)
+```
+
+| Option | Default | Alternative (0.6) |
+|--|--|--|
+| `collectionArguments` | `.whole`: `including`, `append` and `prepend` add a collection argument as one nested element | `.firstElement`: they add only its first element |
+| `collectionKinds` | `.distinguished`: collections are sequences, ordered sets, sets or bags, and operations keep the kind of their receiver | `.sequences`: every collection behaves as a sequence |
+| `singleValueCollections` | `.set`: an arrow call on a single value sees a set (an empty set for `null`) | `.sequence`: it sees a sequence |
+| `containerLookup` | `.resources`: containers are found through the registered resources | `.registeredObjects`: containers are found among the objects the resources list |
+
+The raw value of each choice is its command-line spelling (for example `first-element`
+or `registered-objects`), so that tools can parse it with `init(rawValue:)` and list the
+choices through `allCases`.
+
+## Compatibility with 0.6
+
+Version 0.6 contexts were created with `AQLExecutionContext(executionEngine:)` or
+`AQLExecutionContext(unsetFeatureReads:)`. Both initialisers still exist and still
+behave as in 0.6: they use `AQLOptions.legacy`. They are deprecated in favour of the
+initialisers that take `options:`; pass `options: .legacy` to keep the 0.6 behaviour.
+The behaviours that changed are:
+
+- **Collection arguments**: `Sequence{'a'}->append(Sequence{'b', 'c'})` now yields a
+  sequence whose second element is `Sequence{'b', 'c'}`; 0.6 added only `'b'`. Option
+  `collectionArguments`; use `.firstElement` for the 0.6 behaviour.
+- **Collection kinds**: literals and the conversions `asSequence()`, `asOrderedSet()`,
+  `asSet()` and `asBag()` create collections of their kind, and operations keep it. On
+  an ordered set or a set, `including` does not repeat an element already present,
+  `append`, `prepend` and `insertAt` move it, and `concat`, `collect`, `flatten` and
+  navigation leave out repeated results. `sep` yields a sequence, and `closure` an
+  ordered set or a set. In 0.6 every collection behaved as a sequence. Option
+  `collectionKinds`; use `.sequences` for the 0.6 behaviour.
+- **Arrow calls on single values**: `'a'->including('a')` now yields `Set{'a'}`; 0.6
+  yielded `Sequence{'a', 'a'}`. Option `singleValueCollections`; use `.sequence` for
+  the 0.6 behaviour (it matters only while collection kinds are distinguished).
+- **Containers**: `eContainer()`, `ancestors()` and the sibling services ask the
+  registered resources, so they also find the containers of nested metamodel contents,
+  such as the class of an attribute, which 0.6 did not find. When several objects claim
+  the same object, the first resource that knows a container answers, and within a
+  resource the first claiming object; 0.6 took the last claim it found. Option
+  `containerLookup`; use `.registeredObjects` for the 0.6 behaviour.
+
+`AQLService` gained `modifiesModels` and `invoke(_:)`, and `AQLServiceCall` gained
+`receiverKind`; the 0.6 initialisers of `AQLService` remain and create services that do
+not modify models.
+
 ## Containment Queries
 
 `eContainer()`, `ancestors()` and the sibling services ask the resources registered
-with `AQLExecutionContext.addResource(_:)` for the container of an object, so they
-always see the current models. Set `cachesContainmentIndex` on the context to look up
+with `AQLExecutionContext.addResource(_:)` for the container of an object (unless
+`containerLookup` is `.registeredObjects`), so they always see the current models. Set `cachesContainmentIndex` on the context to look up
 each container only once while the models stay unchanged. Adding a resource drops the
 cache, and so does every call of a service created with `modifiesModels: true`. After
 changing a model in any other way while caching is on, call
@@ -61,8 +118,8 @@ the declared default value or the default of its data type (`false`, zero, the f
 enumeration literal) for single-valued attributes, and an empty collection for many-valued
 features. Unset strings without a declared default, dates, arbitrary-precision numbers and
 single-valued references yield `null`. Create a context with
-`AQLExecutionContext(unsetFeatureReads: .undefined)` to read every unset feature as `null`
-instead.
+`AQLExecutionContext(options: .standard, unsetFeatureReads: .undefined)` to read every
+unset feature as `null` instead.
 
 ## Requirements
 
