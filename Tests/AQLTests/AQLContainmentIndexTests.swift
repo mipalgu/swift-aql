@@ -92,8 +92,8 @@ struct AQLContainmentIndexTests {
         #expect(try await evaluate(query, in: cached) == expected)
     }
 
-    @Test("A cached index is built once for repeated containment queries")
-    func cachedIndexIsBuiltOnce() async throws {
+    @Test("With caching, each container is looked up once for repeated containment queries")
+    func cachedContainersAreLookedUpOnce() async throws {
         let t = await TreeFixture()
         t.context.cachesContainmentIndex = true
         for _ in 0..<100 {
@@ -101,16 +101,35 @@ struct AQLContainmentIndexTests {
             _ = try await t.call(t.a2, "ancestors")
             _ = try await t.call(t.a1, "eContainer", AQLTypeLiteralExpression(packageName: nil, typeName: "Node"))
         }
-        #expect(t.context.containmentIndexBuilds == 1)
+        // a1, a2, a and root are each looked up once.
+        #expect(t.context.containerLookups == 4)
     }
 
-    @Test("Without caching, one containment query builds the index at most once")
-    func uncachedQueryBuildsOnce() async throws {
+    @Test("Without caching, a containment query looks up only the containers it follows")
+    func uncachedQueryLooksUpOnlyWhatItFollows() async throws {
         let t = await TreeFixture()
-        _ = try await t.call(t.a1, "eContainer", AQLTypeLiteralExpression(packageName: nil, typeName: "Leaf"))
-        #expect(t.context.containmentIndexBuilds == 1)
+        _ = try await t.call(t.a1, "eContainer")
+        #expect(t.context.containerLookups == 1)
         _ = try await t.call(t.a1, "ancestors")
-        #expect(t.context.containmentIndexBuilds == 2)
+        #expect(t.context.containerLookups == 4)
+        _ = try await t.call(t.a1, "siblings")
+        #expect(t.context.containerLookups == 5)
+    }
+
+    @Test("Metamodel objects find their containers with and without caching")
+    func metamodelContainers() async throws {
+        let t = await TreeFixture()
+        var package = EPackage(name: "p", nsURI: "http://example.org/p", nsPrefix: "p")
+        package.eClassifiers = [t.nodeClass]
+        let metamodel = Resource()
+        await metamodel.add(package)
+        t.context.addResource(metamodel)
+        let attribute = try #require(t.nodeClass.eStructuralFeatures.first as? EAttribute)
+        for caches in [false, true] {
+            t.context.cachesContainmentIndex = caches
+            #expect((try await t.call(t.nodeClass, "eContainer") as? EPackage)?.name == "p")
+            #expect((try await t.call(attribute, "eContainer") as? EClass)?.name == "Node")
+        }
     }
 
     @Test("Without caching, containment queries see model changes immediately")
@@ -131,7 +150,8 @@ struct AQLContainmentIndexTests {
         t.context.invalidateContainmentIndex()
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["b"])
         #expect(t.names(try await t.call(t.a1, "siblings")) == [])
-        #expect(t.context.containmentIndexBuilds == 2)
+        // a2 before and after the invalidation, then a1.
+        #expect(t.context.containerLookups == 3)
     }
 
     @Test("Switching caching off drops the cached index")

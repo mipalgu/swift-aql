@@ -61,12 +61,13 @@ public final class AQLExecutionContext: Sendable {
     /// behaviour of this package: 0-based positions, -1 if absent.
     public var usesOneBasedIndexOf: Bool = true
 
-    /// Whether the child-to-parent containment index is cached between calls.
+    /// Whether the containers found by containment queries are cached between calls.
     ///
     /// Without caching, every call of `eContainer()`, `ancestors()`, `siblings()`,
-    /// `precedingSiblings()` or `followingSiblings()` examines every object of the registered
-    /// resources. With caching, the containment structure is examined once and reused until
-    /// it may have changed, which makes these services cheap on large models.
+    /// `precedingSiblings()` or `followingSiblings()` asks the registered resources for the
+    /// container of each object it looks at, so the answers always reflect the current models.
+    /// With caching, each object's container is looked up once and reused until the models
+    /// may have changed, which saves the lookups when the same objects are queried repeatedly.
     ///
     /// The cache is dropped when a resource is added with ``addResource(_:)``, after each call
     /// of a service that declares ``AQLService/modifiesModels``, and when caching is switched
@@ -75,15 +76,15 @@ public final class AQLExecutionContext: Sendable {
     /// by a call of ``invalidateContainmentIndex()``.
     public var cachesContainmentIndex: Bool = false {
         didSet {
-            if !cachesContainmentIndex { containmentIndex = nil }
+            if !cachesContainmentIndex { cachedContainers = [:] }
         }
     }
 
-    /// The cached parent of every contained object, keyed by child identifier.
-    private var containmentIndex: [EUUID: (any EObject)]?
+    /// The containers looked up while caching, keyed by child identifier (`nil` for none).
+    private var cachedContainers: [EUUID: (any EObject)?] = [:]
 
-    /// How many times the containment index has been built.
-    private(set) var containmentIndexBuilds = 0
+    /// How many times the registered resources have been asked for a container.
+    private(set) var containerLookups = 0
 
     // MARK: - Initialisation
 
@@ -139,7 +140,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameter resource: The resource holding model objects.
     public func addResource(_ resource: Resource) {
         if !resources.contains(where: { $0 === resource }) { resources.append(resource) }
-        containmentIndex = nil
+        cachedContainers = [:]
     }
 
     /// Resolves an object identifier against the registered resources.
@@ -153,28 +154,31 @@ public final class AQLExecutionContext: Sendable {
         return nil
     }
 
-    /// Drops the cached containment index (see ``cachesContainmentIndex``).
+    /// Drops the cached containers (see ``cachesContainmentIndex``).
     public func invalidateContainmentIndex() {
-        containmentIndex = nil
+        cachedContainers = [:]
     }
 
-    /// The parent object of every contained object, keyed by child identifier.
+    /// The object that contains the object with the given identifier.
     ///
-    /// - Returns: The parents of all objects reachable through containment references of the
-    ///   registered resources.
-    func parents() async throws -> [EUUID: any EObject] {
-        if cachesContainmentIndex, let containmentIndex { return containmentIndex }
-        containmentIndexBuilds += 1
-        var index: [EUUID: any EObject] = [:]
+    /// The registered resources are asked in the order they were added, and the first one
+    /// that knows a container answers.
+    ///
+    /// - Parameter id: The identifier of the contained object.
+    /// - Returns: The container, or `nil` if no registered resource holds the object in a
+    ///   containment reference.
+    func container(of id: EUUID) async -> (any EObject)? {
+        if cachesContainmentIndex, let cached = cachedContainers[id] { return cached }
+        containerLookups += 1
+        var found: (any EObject)?
         for resource in resources {
-            for object in await resource.getAllObjects() {
-                for id in try await AQLObjectServices.containedIdentifiers(of: object, in: self) {
-                    index[id] = object
-                }
+            if let entry = await resource.container(ofIdentifier: id) {
+                found = entry.container
+                break
             }
         }
-        if cachesContainmentIndex { containmentIndex = index }
-        return index
+        if cachesContainmentIndex { cachedContainers[id] = .some(found) }
+        return found
     }
 
     // MARK: - Variable Management

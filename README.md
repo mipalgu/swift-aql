@@ -42,13 +42,13 @@ arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
 
 ## Containment Queries
 
-`eContainer()`, `ancestors()` and the sibling services look up the container of an
-object in the resources registered with `AQLExecutionContext.addResource(_:)`. Set
-`cachesContainmentIndex` on the context to examine the containment structure once
-and reuse it, which keeps these services cheap on large models. Adding a resource
-drops the cache, and so does every call of a service created with
-`modifiesModels: true`. After changing a model in any other way while caching is
-on, call `invalidateContainmentIndex()`.
+`eContainer()`, `ancestors()` and the sibling services ask the resources registered
+with `AQLExecutionContext.addResource(_:)` for the container of an object, so they
+always see the current models. Set `cachesContainmentIndex` on the context to look up
+each container only once while the models stay unchanged. Adding a resource drops the
+cache, and so does every call of a service created with `modifiesModels: true`. After
+changing a model in any other way while caching is on, call
+`invalidateContainmentIndex()`.
 
 ## Parsing
 
