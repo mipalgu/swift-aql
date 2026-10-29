@@ -22,6 +22,7 @@ struct TreeFixture {
     let a1: DynamicEObject
     let a2: DynamicEObject
     let b: DynamicEObject
+    let resource: Resource
     let context: AQLExecutionContext
 
     init() async {
@@ -61,6 +62,7 @@ struct TreeFixture {
         self.a1 = a1
         self.a2 = a2
         self.b = b
+        self.resource = resource
         self.context = context
     }
 

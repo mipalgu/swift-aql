@@ -98,10 +98,11 @@ public struct AQLObjectServices: AQLServiceProvider {
             try await Self.allContents(of: object, in: call.context)
         }
         list += typed("eContainer") { call, object, type in
-            var current = try await call.context.parents()[object.id]
+            let parents = try await call.context.parents()
+            var current = parents[object.id]
             while let container = current {
                 if type?.isKind(container) ?? true { return container }
-                current = try await call.context.parents()[container.id]
+                current = parents[container.id]
             }
             return nil
         }
@@ -210,6 +211,37 @@ public struct AQLObjectServices: AQLServiceProvider {
                 for item in AQLValues.coerceToCollection(viaEngine)
                 where !result.contains(where: { AQLValues.areEqual($0, item) }) {
                     result.append(item)
+                }
+            }
+        }
+        return result
+    }
+
+    /// The identifiers of the objects directly contained by an object.
+    ///
+    /// Unlike ``contents(of:in:)``, this reads the identifiers from the values of the
+    /// containment references without resolving them, so that it costs no lookups in the
+    /// registered resources. It falls back to ``contents(of:in:)`` for values that are neither
+    /// identifiers nor objects.
+    ///
+    /// - Parameters:
+    ///   - object: The container.
+    ///   - context: The execution context used to resolve unusual values.
+    /// - Returns: The identifiers of the contained objects.
+    static func containedIdentifiers(of object: any EObject, in context: AQLExecutionContext)
+        async throws -> [EUUID]
+    {
+        guard let eClass = object.eClass as? EClass else { return [] }
+        var result: [EUUID] = []
+        for feature in orderedFeatures(of: eClass) {
+            guard let reference = feature as? EReference, reference.containment else { continue }
+            for item in AQLValues.coerceToCollection(object.eGet(reference)) {
+                if let id = item as? EUUID {
+                    result.append(id)
+                } else if let child = item as? any EObject {
+                    result.append(child.id)
+                } else {
+                    return try await contents(of: object, in: context).compactMap { ($0 as? any EObject)?.id }
                 }
             }
         }
