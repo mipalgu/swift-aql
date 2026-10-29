@@ -100,7 +100,7 @@ public struct AQLNavigationExpression: AQLExpression {
                 name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
                 customOnly: true)
             {
-                return try await service.implementation(
+                return try await service.invoke(
                     AQLServiceCall(
                         name: property, receiver: sourceValue, arguments: [], context: context))
             }

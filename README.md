@@ -40,6 +40,16 @@ may be asynchronous and use `call.context` to navigate the model. Iterator
 arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
 (`ecore::EClass`) as `AQLTypeDescriptor` values.
 
+## Containment Queries
+
+`eContainer()`, `ancestors()` and the sibling services look up the container of an
+object in the resources registered with `AQLExecutionContext.addResource(_:)`. Set
+`cachesContainmentIndex` on the context to examine the containment structure once
+and reuse it, which keeps these services cheap on large models. Adding a resource
+drops the cache, and so does every call of a service created with
+`modifiesModels: true`. After changing a model in any other way while caching is
+on, call `invalidateContainmentIndex()`.
+
 ## Parsing
 
 `AQLParser().parse(_:)` reads one AQL expression from text and returns the expression, the diagnostics (`SourceDiagnostic` values with ranges and the codes of `AQLDiagnosticCode`) and the tokens. Host languages that embed AQL read their own tokens through an `AQLTokenCursor` and shape the nodes through an `AQLParserDelegate`. `AQLSyntax.tokens(in:)` splits text into highlighting tokens and never fails. Every expression node carries an `origin` (its range in the source text) that never takes part in equality, and `AQLTreePrinter` prints a tree as one deterministic line.

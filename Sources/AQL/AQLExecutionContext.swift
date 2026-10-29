@@ -63,11 +63,27 @@ public final class AQLExecutionContext: Sendable {
 
     /// Whether the child-to-parent containment index is cached between calls.
     ///
-    /// Caching makes `eContainer()`, `ancestors()` and `siblings()` cheap on large models, but the
-    /// cache must be dropped with ``invalidateContainmentIndex()`` after the model changes.
-    public var cachesContainmentIndex: Bool = false
+    /// Without caching, every call of `eContainer()`, `ancestors()`, `siblings()`,
+    /// `precedingSiblings()` or `followingSiblings()` examines every object of the registered
+    /// resources. With caching, the containment structure is examined once and reused until
+    /// it may have changed, which makes these services cheap on large models.
+    ///
+    /// The cache is dropped when a resource is added with ``addResource(_:)``, after each call
+    /// of a service that declares ``AQLService/modifiesModels``, and when caching is switched
+    /// off. Any other change to the registered models while caching is on (for example by
+    /// code that sets features through a ``Resource`` between evaluations) must be followed
+    /// by a call of ``invalidateContainmentIndex()``.
+    public var cachesContainmentIndex: Bool = false {
+        didSet {
+            if !cachesContainmentIndex { containmentIndex = nil }
+        }
+    }
 
+    /// The cached parent of every contained object, keyed by child identifier.
     private var containmentIndex: [EUUID: (any EObject)]?
+
+    /// How many times the containment index has been built.
+    private(set) var containmentIndexBuilds = 0
 
     // MARK: - Initialisation
 
@@ -148,11 +164,12 @@ public final class AQLExecutionContext: Sendable {
     ///   registered resources.
     func parents() async throws -> [EUUID: any EObject] {
         if cachesContainmentIndex, let containmentIndex { return containmentIndex }
+        containmentIndexBuilds += 1
         var index: [EUUID: any EObject] = [:]
         for resource in resources {
             for object in await resource.getAllObjects() {
-                for child in try await AQLObjectServices.contents(of: object, in: self) {
-                    if let child = child as? any EObject { index[child.id] = object }
+                for id in try await AQLObjectServices.containedIdentifiers(of: object, in: self) {
+                    index[id] = object
                 }
             }
         }
@@ -273,7 +290,7 @@ public final class AQLExecutionContext: Sendable {
                 name: property, receiver: eObject, hasReceiver: true, argumentCount: 0,
                 customOnly: true)
         else { return value }
-        return try await service.implementation(
+        return try await service.invoke(
             AQLServiceCall(name: property, receiver: eObject, arguments: [], context: self))
     }
 

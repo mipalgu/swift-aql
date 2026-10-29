@@ -136,7 +136,7 @@ public struct AQLCallExpression: AQLExpression {
             }
         }
 
-        return try await service.implementation(
+        return try await service.invoke(
             AQLServiceCall(
                 name: methodName, receiver: receiver, arguments: argumentValues, context: context))
     }
