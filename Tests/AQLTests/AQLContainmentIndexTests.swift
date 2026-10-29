@@ -199,6 +199,21 @@ struct AQLContainmentIndexTests {
         #expect(AQLService("changing", modifiesModels: true) { _ in nil }.aliased(as: "alias").modifiesModels)
     }
 
+    @Test("Services created with the initialisers of version 0.6 do not modify models")
+    func earlierServiceInitialisers() {
+        typealias RangeInitialiser = (
+            String, AQLReceiver, ClosedRange<Int>, Bool, @escaping AQLServiceImplementation
+        ) -> AQLService
+        typealias CountInitialiser = (
+            String, AQLReceiver, Int, Bool, @escaping AQLServiceImplementation
+        ) -> AQLService
+        let range: RangeInitialiser = AQLService.init(_:receiver:arity:acceptsTypeArguments:implementation:)
+        let count: CountInitialiser = AQLService.init(_:receiver:arity:acceptsTypeArguments:implementation:)
+        let services = [range("r", .any, 0...1, false) { _ in nil }, count("c", .any, 2, true) { _ in nil }]
+        #expect(services.map(\.arity) == [0...1, 2...2])
+        #expect(services.allSatisfy { !$0.modifiesModels })
+    }
+
     @Test("Objects held by another resource find their container")
     func crossResourceContainment() async throws {
         let t = await TreeFixture()
