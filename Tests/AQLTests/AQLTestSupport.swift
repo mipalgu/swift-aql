@@ -47,6 +47,12 @@ func makeContext() -> AQLExecutionContext {
     AQLExecutionContext(executionEngine: ECoreExecutionEngine(models: [:]))
 }
 
+/// Creates a context with an empty engine and the given options.
+@MainActor
+func makeContext(options: AQLOptions) -> AQLExecutionContext {
+    AQLExecutionContext(executionEngine: ECoreExecutionEngine(models: [:]), options: options)
+}
+
 /// Evaluates a library case in a fresh context.
 @MainActor
 func evaluate(_ test: LibraryCase, in context: AQLExecutionContext = makeContext()) async throws
@@ -60,7 +66,7 @@ func evaluate(_ test: LibraryCase, in context: AQLExecutionContext = makeContext
 
 /// Checks a library case.
 @MainActor
-func check(_ test: LibraryCase) async throws {
-    let result = try await evaluate(test)
+func check(_ test: LibraryCase, in context: AQLExecutionContext = makeContext()) async throws {
+    let result = try await evaluate(test, in: context)
     #expect(AQLValues.areEqual(result, test.expected), "got \(AQLValues.description(of: result))")
 }

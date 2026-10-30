@@ -12,8 +12,9 @@ import Foundation
 /// Value helpers shared by the standard library and by client-written services.
 ///
 /// The helpers implement the AQL value model on top of ``EcoreValue``:
-/// collections are `EcoreValueArray` (or any array of values), objects are
-/// compared by identity, and numbers compare by value across integer and real
+/// collections are `EcoreValueArray` (or any array of values, which counts as
+/// a sequence) and carry their ``EcoreCollectionKind``, objects are compared
+/// by identity, and numbers compare by value across integer and real
 /// representations.
 public enum AQLValues {
 
@@ -39,12 +40,36 @@ public enum AQLValues {
         return elements(of: value) ?? [value]
     }
 
-    /// Wraps elements as a collection value.
+    /// Wraps elements as a sequence.
     ///
     /// - Parameter elements: The elements.
-    /// - Returns: The collection value.
+    /// - Returns: The collection value, a ``EcoreCollectionKind/sequence``.
     public static func collection(_ elements: [any EcoreValue]) -> EcoreValueArray {
         EcoreValueArray(elements)
+    }
+
+    /// Wraps elements as a collection value of the given kind.
+    ///
+    /// For a unique kind (an ordered set or a set), an element equal to an earlier one
+    /// (by ``areEqual(_:_:)``) is left out, so that the first occurrence keeps its position.
+    ///
+    /// - Parameters:
+    ///   - elements: The elements.
+    ///   - kind: The kind of collection to create.
+    /// - Returns: The collection value.
+    public static func collection(_ elements: [any EcoreValue], kind: EcoreCollectionKind) -> EcoreValueArray {
+        EcoreValueArray(kind.isUnique ? distinct(elements) : elements, kind: kind)
+    }
+
+    /// The collection kind of a value.
+    ///
+    /// A native array of values counts as a sequence.
+    ///
+    /// - Parameter value: The value to inspect.
+    /// - Returns: The kind, or nil if the value is not a collection.
+    public static func kind(of value: (any EcoreValue)?) -> EcoreCollectionKind? {
+        if let array = value as? EcoreValueArray { return array.kind }
+        return elements(of: value) == nil ? nil : .sequence
     }
 
     /// Removes duplicates (by ``areEqual(_:_:)``), keeping the first occurrence.

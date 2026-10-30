@@ -33,7 +33,7 @@ import ECore
 
 // Create execution context
 let engine = ECoreExecutionEngine(models: ["model": myModel])
-let context = AQLExecutionContext(executionEngine: engine)
+let context = AQLExecutionContext(executionEngine: engine, options: .standard)
 
 // Parse a query
 let parser = AQLParser()
@@ -54,6 +54,14 @@ let result = try await query.evaluate(in: context, self: myClass)
 
 - ``AQLExecutionContext``
 - ``AQLEvaluator``
+
+### Options
+
+- ``AQLOptions``
+- ``AQLCollectionArguments``
+- ``AQLCollectionKinds``
+- ``AQLSingleValueCollections``
+- ``AQLContainerLookup``
 
 ### Expressions
 

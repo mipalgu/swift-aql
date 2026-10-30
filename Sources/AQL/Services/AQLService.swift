@@ -134,6 +134,17 @@ public struct AQLServiceCall: Sendable {
         AQLValues.coerceToCollection(receiver)
     }
 
+    /// The collection kind of the receiver.
+    ///
+    /// A receiver that is not a collection counts as a sequence; an arrow call has
+    /// already turned such a receiver into a collection (see
+    /// ``AQLOptions/singleValueCollections``). While ``AQLOptions/collectionKinds`` of the
+    /// context is ``AQLCollectionKinds/sequences``, every receiver counts as a sequence.
+    @MainActor
+    public var receiverKind: EcoreCollectionKind {
+        context.collectionKind(of: receiver)
+    }
+
     /// The argument at the given position as a string.
     ///
     /// - Parameter index: The zero-based argument position.
@@ -205,6 +216,11 @@ public typealias AQLServiceImplementation =
 /// it takes. When several services share a name, the dispatcher picks the
 /// first whose receiver requirement and arity accept the call, searching
 /// the most recently registered provider first.
+///
+/// AQL expressions are free of side effects, and services are expected to be as well.
+/// A service that changes the model (for example by setting a feature through its
+/// ``Resource``) must say so with ``modifiesModels``, so that an execution context that
+/// caches the containment structure drops the cache after each call of the service.
 public struct AQLService: Sendable {
     /// The service name.
     public let name: String
@@ -221,10 +237,19 @@ public struct AQLService: Sendable {
     /// implementation as an ``AQLTypeDescriptor`` rather than being looked up as a variable.
     public let acceptsTypeArguments: Bool
 
+    /// Whether calling the service may change the models searched by the execution context.
+    ///
+    /// When `true`, the execution context drops its cached containment index (see
+    /// ``AQLExecutionContext/cachesContainmentIndex``) after every call of the service, so
+    /// that `eContainer()` and related services see the changed model. A service that changes
+    /// the model and then evaluates containment queries itself must call
+    /// ``AQLExecutionContext/invalidateContainmentIndex()`` before doing so.
+    public let modifiesModels: Bool
+
     /// The implementation.
     public let implementation: AQLServiceImplementation
 
-    /// Creates a service.
+    /// Creates a service that does not change the models.
     ///
     /// - Parameters:
     ///   - name: The service name.
@@ -239,14 +264,38 @@ public struct AQLService: Sendable {
         acceptsTypeArguments: Bool = false,
         implementation: @escaping AQLServiceImplementation
     ) {
+        self.init(
+            name, receiver: receiver, arity: arity, acceptsTypeArguments: acceptsTypeArguments,
+            modifiesModels: false, implementation: implementation)
+    }
+
+    /// Creates a service that declares whether it changes the models.
+    ///
+    /// - Parameters:
+    ///   - name: The service name.
+    ///   - receiver: The receivers accepted (default: any receiver).
+    ///   - arity: The accepted argument counts (default: none).
+    ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
+    ///   - modifiesModels: Whether calling the service may change the models.
+    ///   - implementation: The implementation.
+    public init(
+        _ name: String,
+        receiver: AQLReceiver = .any,
+        arity: ClosedRange<Int> = 0...0,
+        acceptsTypeArguments: Bool = false,
+        modifiesModels: Bool,
+        implementation: @escaping AQLServiceImplementation
+    ) {
         self.name = name
         self.receiver = receiver
         self.arity = arity
         self.acceptsTypeArguments = acceptsTypeArguments
+        self.modifiesModels = modifiesModels
         self.implementation = implementation
     }
 
-    /// Creates a service taking exactly the given number of arguments.
+    /// Creates a service taking exactly the given number of arguments that does not change
+    /// the models.
     ///
     /// - Parameters:
     ///   - name: The service name.
@@ -263,7 +312,32 @@ public struct AQLService: Sendable {
     ) {
         self.init(
             name, receiver: receiver, arity: arity...arity,
-            acceptsTypeArguments: acceptsTypeArguments, implementation: implementation)
+            acceptsTypeArguments: acceptsTypeArguments, modifiesModels: false,
+            implementation: implementation)
+    }
+
+    /// Creates a service taking exactly the given number of arguments that declares whether
+    /// it changes the models.
+    ///
+    /// - Parameters:
+    ///   - name: The service name.
+    ///   - receiver: The receivers accepted.
+    ///   - arity: The exact argument count.
+    ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
+    ///   - modifiesModels: Whether calling the service may change the models.
+    ///   - implementation: The implementation.
+    public init(
+        _ name: String,
+        receiver: AQLReceiver = .any,
+        arity: Int,
+        acceptsTypeArguments: Bool = false,
+        modifiesModels: Bool,
+        implementation: @escaping AQLServiceImplementation
+    ) {
+        self.init(
+            name, receiver: receiver, arity: arity...arity,
+            acceptsTypeArguments: acceptsTypeArguments, modifiesModels: modifiesModels,
+            implementation: implementation)
     }
 
     /// Creates a copy of this service registered under another name.
@@ -273,7 +347,23 @@ public struct AQLService: Sendable {
     public func aliased(as alias: String) -> AQLService {
         AQLService(
             alias, receiver: receiver, arity: arity,
-            acceptsTypeArguments: acceptsTypeArguments, implementation: implementation)
+            acceptsTypeArguments: acceptsTypeArguments, modifiesModels: modifiesModels,
+            implementation: implementation)
+    }
+
+    /// Calls the service.
+    ///
+    /// Unlike calling ``implementation`` directly, this drops the cached containment index of
+    /// the call's context afterwards if the service ``modifiesModels``.
+    ///
+    /// - Parameter call: The call, with its evaluated receiver and arguments.
+    /// - Returns: The result of the service.
+    /// - Throws: Any error the implementation throws.
+    @MainActor
+    public func invoke(_ call: AQLServiceCall) async throws -> (any EcoreValue)? {
+        guard modifiesModels else { return try await implementation(call) }
+        defer { call.context.invalidateContainmentIndex() }
+        return try await implementation(call)
     }
 }
 
