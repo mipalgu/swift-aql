@@ -11,22 +11,18 @@ import Foundation
 /// A collection literal such as `Sequence{a, b}` or `OrderedSet{x}`.
 ///
 /// Elements keep their runtime values (objects stay objects). Nested
-/// collections are kept as elements, not flattened.
+/// collections are kept as elements, not flattened. The value is a collection
+/// of the literal's kind; ordered sets and sets leave out repeated elements.
+/// While ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``, the
+/// value is a sequence (still without the repeated elements of an ordered set or set).
 public struct AQLCollectionLiteralExpression: AQLExpression {
     /// Where the expression was written, if known.
     public let origin: SourceOrigin
 
     /// The kind of collection.
-    public enum Kind: String, Sendable {
-        /// An ordered collection that may contain duplicates.
-        case sequence = "Sequence"
-        /// An ordered collection without duplicates.
-        case orderedSet = "OrderedSet"
-        /// An unordered collection without duplicates (held in insertion order).
-        case set = "Set"
-        /// A collection that may contain duplicates (held in insertion order).
-        case bag = "Bag"
-    }
+    ///
+    /// The literal kinds are the collection kinds of the values they create.
+    public typealias Kind = EcoreCollectionKind
 
     /// The kind of collection.
     public let kind: Kind
@@ -52,9 +48,6 @@ public struct AQLCollectionLiteralExpression: AQLExpression {
         for element in elements {
             if let value = try await element.evaluate(in: context) { values.append(value) }
         }
-        switch kind {
-        case .sequence, .bag: return EcoreValueArray(values)
-        case .orderedSet, .set: return EcoreValueArray(AQLValues.distinct(values))
-        }
+        return context.collection(values, kind: kind)
     }
 }

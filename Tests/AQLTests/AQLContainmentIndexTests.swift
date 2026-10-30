@@ -84,38 +84,57 @@ struct AQLContainmentIndexTests {
 
     @Test("Containment queries agree with and without caching", arguments: ContainmentQuery.all)
     func cachedAndUncachedAgree(_ query: ContainmentQuery) async throws {
-        let uncached = await TreeFixture()
-        let cached = await TreeFixture()
+        let uncached = await TreeFixture(options: .standard)
+        let cached = await TreeFixture(options: .standard)
         cached.context.cachesContainmentIndex = true
         let expected = try await evaluate(query, in: uncached)
         #expect(try await evaluate(query, in: cached) == expected)
         #expect(try await evaluate(query, in: cached) == expected)
     }
 
-    @Test("A cached index is built once for repeated containment queries")
-    func cachedIndexIsBuiltOnce() async throws {
-        let t = await TreeFixture()
+    @Test("With caching, each container is looked up once for repeated containment queries")
+    func cachedContainersAreLookedUpOnce() async throws {
+        let t = await TreeFixture(options: .standard)
         t.context.cachesContainmentIndex = true
         for _ in 0..<100 {
             _ = try await t.call(t.a1, "eContainer")
             _ = try await t.call(t.a2, "ancestors")
             _ = try await t.call(t.a1, "eContainer", AQLTypeLiteralExpression(packageName: nil, typeName: "Node"))
         }
-        #expect(t.context.containmentIndexBuilds == 1)
+        // a1, a2, a and root are each looked up once.
+        #expect(t.context.containerLookups == 4)
     }
 
-    @Test("Without caching, one containment query builds the index at most once")
-    func uncachedQueryBuildsOnce() async throws {
-        let t = await TreeFixture()
-        _ = try await t.call(t.a1, "eContainer", AQLTypeLiteralExpression(packageName: nil, typeName: "Leaf"))
-        #expect(t.context.containmentIndexBuilds == 1)
+    @Test("Without caching, a containment query looks up only the containers it follows")
+    func uncachedQueryLooksUpOnlyWhatItFollows() async throws {
+        let t = await TreeFixture(options: .standard)
+        _ = try await t.call(t.a1, "eContainer")
+        #expect(t.context.containerLookups == 1)
         _ = try await t.call(t.a1, "ancestors")
-        #expect(t.context.containmentIndexBuilds == 2)
+        #expect(t.context.containerLookups == 4)
+        _ = try await t.call(t.a1, "siblings")
+        #expect(t.context.containerLookups == 5)
+    }
+
+    @Test("Metamodel objects find their containers with and without caching")
+    func metamodelContainers() async throws {
+        let t = await TreeFixture(options: .standard)
+        var package = EPackage(name: "p", nsURI: "http://example.org/p", nsPrefix: "p")
+        package.eClassifiers = [t.nodeClass]
+        let metamodel = Resource()
+        await metamodel.add(package)
+        t.context.addResource(metamodel)
+        let attribute = try #require(t.nodeClass.eStructuralFeatures.first as? EAttribute)
+        for caches in [false, true] {
+            t.context.cachesContainmentIndex = caches
+            #expect((try await t.call(t.nodeClass, "eContainer") as? EPackage)?.name == "p")
+            #expect((try await t.call(attribute, "eContainer") as? EClass)?.name == "Node")
+        }
     }
 
     @Test("Without caching, containment queries see model changes immediately")
     func uncachedSeesChanges() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["a"])
         await moveA2ToB(in: t)
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["b"])
@@ -124,19 +143,20 @@ struct AQLContainmentIndexTests {
 
     @Test("An invalidated index reflects model changes")
     func invalidationReflectsChanges() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         t.context.cachesContainmentIndex = true
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["a"])
         await moveA2ToB(in: t)
         t.context.invalidateContainmentIndex()
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["b"])
         #expect(t.names(try await t.call(t.a1, "siblings")) == [])
-        #expect(t.context.containmentIndexBuilds == 2)
+        // a2 before and after the invalidation, then a1.
+        #expect(t.context.containerLookups == 3)
     }
 
     @Test("Switching caching off drops the cached index")
     func disablingCachingDropsIndex() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         t.context.cachesContainmentIndex = true
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["a"])
         await moveA2ToB(in: t)
@@ -147,7 +167,7 @@ struct AQLContainmentIndexTests {
 
     @Test("Adding a resource drops the cached index")
     func addingResourceDropsIndex() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         t.context.cachesContainmentIndex = true
         #expect(try await t.call(t.root, "eContainer") == nil)
         var holder = DynamicEObject(eClass: t.nodeClass)
@@ -161,7 +181,7 @@ struct AQLContainmentIndexTests {
 
     @Test("A service declared to modify models drops the cached index")
     func modifyingServiceDropsIndex() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         t.context.cachesContainmentIndex = true
         t.context.register(MovingServices(move: { await moveA2ToB(in: t) }, declaresModification: true))
         #expect(t.names(try await t.call(t.a2, "eContainer")) == ["a"])
@@ -179,9 +199,24 @@ struct AQLContainmentIndexTests {
         #expect(AQLService("changing", modifiesModels: true) { _ in nil }.aliased(as: "alias").modifiesModels)
     }
 
+    @Test("Services created with the initialisers of version 0.6 do not modify models")
+    func earlierServiceInitialisers() {
+        typealias RangeInitialiser = (
+            String, AQLReceiver, ClosedRange<Int>, Bool, @escaping AQLServiceImplementation
+        ) -> AQLService
+        typealias CountInitialiser = (
+            String, AQLReceiver, Int, Bool, @escaping AQLServiceImplementation
+        ) -> AQLService
+        let range: RangeInitialiser = AQLService.init(_:receiver:arity:acceptsTypeArguments:implementation:)
+        let count: CountInitialiser = AQLService.init(_:receiver:arity:acceptsTypeArguments:implementation:)
+        let services = [range("r", .any, 0...1, false) { _ in nil }, count("c", .any, 2, true) { _ in nil }]
+        #expect(services.map(\.arity) == [0...1, 2...2])
+        #expect(services.allSatisfy { !$0.modifiesModels })
+    }
+
     @Test("Objects held by another resource find their container")
     func crossResourceContainment() async throws {
-        let t = await TreeFixture()
+        let t = await TreeFixture(options: .standard)
         var child = DynamicEObject(eClass: t.leafClass)
         child.eSet("name", value: "c")
         let other = Resource()

@@ -134,6 +134,17 @@ public struct AQLServiceCall: Sendable {
         AQLValues.coerceToCollection(receiver)
     }
 
+    /// The collection kind of the receiver.
+    ///
+    /// A receiver that is not a collection counts as a sequence; an arrow call has
+    /// already turned such a receiver into a collection (see
+    /// ``AQLOptions/singleValueCollections``). While ``AQLOptions/collectionKinds`` of the
+    /// context is ``AQLCollectionKinds/sequences``, every receiver counts as a sequence.
+    @MainActor
+    public var receiverKind: EcoreCollectionKind {
+        context.collectionKind(of: receiver)
+    }
+
     /// The argument at the given position as a string.
     ///
     /// - Parameter index: The zero-based argument position.
@@ -238,21 +249,41 @@ public struct AQLService: Sendable {
     /// The implementation.
     public let implementation: AQLServiceImplementation
 
-    /// Creates a service.
+    /// Creates a service that does not change the models.
     ///
     /// - Parameters:
     ///   - name: The service name.
     ///   - receiver: The receivers accepted (default: any receiver).
     ///   - arity: The accepted argument counts (default: none).
     ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
-    ///   - modifiesModels: Whether calling the service may change the models (default: `false`).
     ///   - implementation: The implementation.
     public init(
         _ name: String,
         receiver: AQLReceiver = .any,
         arity: ClosedRange<Int> = 0...0,
         acceptsTypeArguments: Bool = false,
-        modifiesModels: Bool = false,
+        implementation: @escaping AQLServiceImplementation
+    ) {
+        self.init(
+            name, receiver: receiver, arity: arity, acceptsTypeArguments: acceptsTypeArguments,
+            modifiesModels: false, implementation: implementation)
+    }
+
+    /// Creates a service that declares whether it changes the models.
+    ///
+    /// - Parameters:
+    ///   - name: The service name.
+    ///   - receiver: The receivers accepted (default: any receiver).
+    ///   - arity: The accepted argument counts (default: none).
+    ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
+    ///   - modifiesModels: Whether calling the service may change the models.
+    ///   - implementation: The implementation.
+    public init(
+        _ name: String,
+        receiver: AQLReceiver = .any,
+        arity: ClosedRange<Int> = 0...0,
+        acceptsTypeArguments: Bool = false,
+        modifiesModels: Bool,
         implementation: @escaping AQLServiceImplementation
     ) {
         self.name = name
@@ -263,21 +294,44 @@ public struct AQLService: Sendable {
         self.implementation = implementation
     }
 
-    /// Creates a service taking exactly the given number of arguments.
+    /// Creates a service taking exactly the given number of arguments that does not change
+    /// the models.
     ///
     /// - Parameters:
     ///   - name: The service name.
     ///   - receiver: The receivers accepted.
     ///   - arity: The exact argument count.
     ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
-    ///   - modifiesModels: Whether calling the service may change the models (default: `false`).
     ///   - implementation: The implementation.
     public init(
         _ name: String,
         receiver: AQLReceiver = .any,
         arity: Int,
         acceptsTypeArguments: Bool = false,
-        modifiesModels: Bool = false,
+        implementation: @escaping AQLServiceImplementation
+    ) {
+        self.init(
+            name, receiver: receiver, arity: arity...arity,
+            acceptsTypeArguments: acceptsTypeArguments, modifiesModels: false,
+            implementation: implementation)
+    }
+
+    /// Creates a service taking exactly the given number of arguments that declares whether
+    /// it changes the models.
+    ///
+    /// - Parameters:
+    ///   - name: The service name.
+    ///   - receiver: The receivers accepted.
+    ///   - arity: The exact argument count.
+    ///   - acceptsTypeArguments: Whether bare identifier arguments denote types.
+    ///   - modifiesModels: Whether calling the service may change the models.
+    ///   - implementation: The implementation.
+    public init(
+        _ name: String,
+        receiver: AQLReceiver = .any,
+        arity: Int,
+        acceptsTypeArguments: Bool = false,
+        modifiesModels: Bool,
         implementation: @escaping AQLServiceImplementation
     ) {
         self.init(

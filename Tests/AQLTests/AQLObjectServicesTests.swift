@@ -25,7 +25,11 @@ struct TreeFixture {
     let resource: Resource
     let context: AQLExecutionContext
 
-    init() async {
+    /// Creates the tree.
+    ///
+    /// - Parameter options: The options of the context, or nil for a context created with
+    ///   the initialiser of version 0.6.
+    init(options: AQLOptions? = nil) async {
         let string = EDataType(name: "EString")
         var node = EClass(name: "Node")
         node.eStructuralFeatures.append(EAttribute(name: "name", eType: string))
@@ -55,7 +59,9 @@ struct TreeFixture {
         for object in [root, a, a1, a2, b] { await resource.add(object) }
         let engine = ECoreExecutionEngine(models: [:])
         await engine.registerResource(resource, alias: "m")
-        let context = AQLExecutionContext(executionEngine: engine)
+        let context =
+            options.map { AQLExecutionContext(executionEngine: engine, options: $0) }
+            ?? AQLExecutionContext(executionEngine: engine)
         context.addResource(resource)
         self.root = root
         self.a = a
