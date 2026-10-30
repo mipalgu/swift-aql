@@ -65,6 +65,21 @@ The raw value of each choice is its command-line spelling (for example `first-el
 or `registered-objects`), so that tools can parse it with `init(rawValue:)` and list the
 choices through `allCases`.
 
+`AQLOptions(semantics:)` selects `.standard` or `.legacy` from a `ModellingSemantics`
+value, and `AQLOptions.fromEnvironment()` reads that choice from the
+`SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`; `.standard` if it
+is unset, and an error for any other value):
+
+```swift
+let context = AQLExecutionContext(options: try AQLOptions.fromEnvironment())
+```
+
+With `.resources`, each resource answers in the `ContainerLookupScope` configured for it
+(`Resource.setContainerLookupScope(_:)`) or for its resource set
+(`ResourceSet(defaultContainerLookupScope:)`), and for an object of any resource if no scope
+is configured. A resource configured with `.thisResource` does not find the container of an
+object held in another resource. `.registeredObjects` does not depend on the scope.
+
 ## Compatibility with 0.6
 
 Version 0.6 contexts were created with `AQLExecutionContext(executionEngine:)` or
