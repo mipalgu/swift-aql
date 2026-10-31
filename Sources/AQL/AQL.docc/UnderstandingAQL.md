@@ -333,6 +333,30 @@ the same object, the first resource that knows a container answers. With
 ``AQLContainerLookup/registeredObjects``, as in version 0.6, containers are found among
 the objects that the resources list, and the last claim found wins.
 
+With ``AQLContainerLookup/resources``, each resource answers in the container lookup scope
+configured for it, through `Resource.container(ofIdentifier:scope:)`: its own scope, else the
+default of its resource set. A resource for which no scope is configured answers for an
+object of any resource, as before the scope could be configured. A resource configured with
+`ContainerLookupScope.thisResource` answers only for the objects that it can resolve itself,
+or that their container embeds as a value, so the container of an object held in another
+resource is not found. ``AQLContainerLookup/registeredObjects`` does not depend on the scope.
+
+```swift
+let resourceSet = ResourceSet(defaultContainerLookupScope: .thisResource)
+```
+
+The ``AQLOptions/init(semantics:)`` initialiser selects ``AQLOptions/standard`` or
+``AQLOptions/legacy`` from a `ModellingSemantics` value, and
+``AQLOptions/fromEnvironment(_:)`` reads that choice from the `SWIFT_MODELLING_SEMANTICS`
+environment variable (`standard` or `legacy`; ``AQLOptions/standard`` if it is unset):
+
+```swift
+let context = AQLExecutionContext(options: try AQLOptions.fromEnvironment())
+```
+
+A context keeps its options for every expression it evaluates, until its
+``AQLExecutionContext/options`` are changed.
+
 ## Evaluation Order
 
 1. **Literals and variables** are evaluated first
