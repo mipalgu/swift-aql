@@ -5,7 +5,9 @@
 //  Created by Rene Hexel on 30/10/2026.
 //  Copyright (c) 2026 Rene Hexel. All rights reserved.
 //
+import ECore
 import EMFBase
+import Foundation
 
 /// How `including`, `append` and `prepend` add an argument that is a collection.
 ///
@@ -92,8 +94,9 @@ public enum AQLContainerLookup: String, Sendable, CaseIterable, Hashable {
     ///
     /// The resources are asked in the order they were added, and the first one that knows a
     /// container answers. This finds the containers of all objects of a resource, including
-    /// the nested contents of a metamodel such as the class of an attribute. This is the
-    /// default.
+    /// the nested contents of a metamodel such as the class of an attribute. Each resource
+    /// answers in the `ContainerLookupScope` configured for it or its resource set, and for
+    /// an object of any resource if none is configured. This is the default.
     case resources
 
     /// The container of an object is the last object that claims it.
@@ -176,4 +179,39 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
         singleValueCollections: .sequence,
         containerLookup: .registeredObjects
     )
+
+    /// Creates the options that a choice of semantics selects.
+    ///
+    /// `ModellingSemantics/standard` selects ``standard`` and
+    /// `ModellingSemantics/legacy` selects ``legacy``.
+    ///
+    /// - Parameter semantics: The semantics to follow.
+    public init(semantics: ModellingSemantics) {
+        switch semantics {
+        case .standard: self = .standard
+        case .legacy: self = .legacy
+        }
+    }
+
+    /// Creates the options that an environment selects.
+    ///
+    /// The `SWIFT_MODELLING_SEMANTICS` variable (`ModellingSemantics/environmentVariable`)
+    /// selects ``standard`` or ``legacy`` by its value, `standard` or `legacy`. Without the
+    /// variable, or with an empty value, the options are ``standard``. A context can take
+    /// its options from the environment of the process once, when it is created:
+    ///
+    /// ```swift
+    /// let context = AQLExecutionContext(options: try AQLOptions.fromEnvironment())
+    /// ```
+    ///
+    /// - Parameter environment: The environment variables to read; by default those of the
+    ///   current process.
+    /// - Returns: The selected options.
+    /// - Throws: `ModellingSemanticsError/invalidValue(_:variable:)` if the variable holds
+    ///   any other value.
+    public static func fromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws(ModellingSemanticsError) -> AQLOptions {
+        AQLOptions(semantics: try ModellingSemantics.fromEnvironment(environment) ?? .standard)
+    }
 }
