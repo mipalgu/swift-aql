@@ -24,7 +24,29 @@ import Foundation
 /// from or collecting over an ordered set yields an ordered set. The exceptions are the
 /// conversions (`asSequence`, `asOrderedSet`, `asSet`, `asBag`), which yield their named kind,
 /// `sep`, which yields a sequence, and `closure`, which yields an ordered set for an ordered
-/// receiver and a set otherwise. `union` leaves out repeated elements for every kind.
+/// receiver and a set otherwise.
+///
+/// `concat` (`addAll`) appends the elements of its argument to those of the receiver, so that
+/// a sequence or a bag keeps repeated elements while an ordered set or a set leaves them out.
+/// `add`, which the `+` operator also computes, does the same for a collection argument; with
+/// a string argument it yields the text of the receiver's elements followed by the string
+/// (`Sequence{'a', 'b'}.add('c')` is `'abc'`), and any other argument is an error. `union`
+/// keeps the repeated elements of a sequence or a bag as `concat` does, and leaves them out
+/// for an ordered set or a set; with ``AQLSequenceUnion/distinct`` as the
+/// ``AQLOptions/sequenceUnion`` of the context, it leaves them out for every kind. `sub`
+/// (`difference`, `removeAll`), which the `-` operator also computes for two collections,
+/// removes every occurrence of the elements of its argument; `intersection` keeps every
+/// occurrence of the receiver's elements that its argument holds; `excluding` removes every
+/// occurrence of its argument. With a null argument, `add` yields the text of the receiver
+/// (see ``AQLOptions/nullAddition``).
+///
+/// `union`, `concat` (`addAll`), `sub` (`difference`, `removeAll`), `intersection`,
+/// `includesAll` and `excludesAll` take a collection argument; an argument that is not a
+/// collection counts as a collection holding it, and null as an empty collection. A `union`
+/// may combine collections of any kinds. With ``AQLOptions/strict`` on, these services raise
+/// ``AQLExecutionError/typeError(_:)`` instead, as Eclipse AQL has no service for such
+/// calls: for an argument that is not a collection, and for a `union` of a sequence or a bag
+/// with an ordered set or a set.
 ///
 /// `including`, `append`, `prepend` and `insertAt` add their argument as one element, so a
 /// collection argument becomes a nested collection, and a null argument adds nothing. With
@@ -44,7 +66,7 @@ import Foundation
 /// `isUnique`, `one`, `exists`, `forAll`, `any`.
 ///
 /// Transformations: `including`, `excluding`, `union`, `intersection`, `sub` (`difference`,
-/// `removeAll`), `concat` (`addAll`, `+`), `append`, `prepend`, `insertAt`, `reverse`, `flatten`,
+/// `removeAll`), `concat` (`addAll`, `+`), `add`, `append`, `prepend`, `insertAt`, `reverse`, `flatten`,
 /// `asSet`, `asOrderedSet`, `asSequence`, `asBag`, `drop`, `dropRight`, `subSequence`,
 /// `subOrderedSet`, `sep`, `filter`, `sortedBy`, `select`, `reject`, `collect`, `closure`.
 public struct AQLCollectionServices: AQLServiceProvider {
@@ -93,6 +115,24 @@ public struct AQLCollectionServices: AQLServiceProvider {
         case .whole: return value.map { [$0] } ?? []
         case .firstElement: return Array(AQLValues.coerceToCollection(value).prefix(1))
         }
+    }
+
+    /// The argument of a service that takes a collection, as the elements of that collection.
+    ///
+    /// An argument that is not a collection counts as a collection holding it, and null as an
+    /// empty collection, unless the ``AQLOptions/strict`` option of the context is on.
+    ///
+    /// - Parameter call: The call whose first argument to inspect.
+    /// - Returns: The elements of the argument.
+    /// - Throws: ``AQLExecutionError/typeError(_:)`` in strict mode if the argument is not a
+    ///   collection.
+    @MainActor
+    private static func collectionArgument(_ call: AQLServiceCall) throws -> [any EcoreValue] {
+        if let items = AQLValues.elements(of: call.argument(0)) { return items }
+        if call.context.options.strict {
+            throw AQLExecutionError.typeError("\(call.name) requires a collection argument")
+        }
+        return call.elements(0)
     }
 
     private static func position(of value: (any EcoreValue)?, in items: [any EcoreValue], last: Bool) -> Int? {
@@ -184,11 +224,11 @@ public struct AQLCollectionServices: AQLServiceProvider {
         add(["excludes"], arity: 1...1) { !Self.contains($0.receiverElements(), $0.argument(0)) }
         add(["includesAll"], arity: 1...1) { call in
             let items = call.receiverElements()
-            return call.elements(0).allSatisfy { Self.contains(items, $0) }
+            return try Self.collectionArgument(call).allSatisfy { Self.contains(items, $0) }
         }
         add(["excludesAll"], arity: 1...1) { call in
             let items = call.receiverElements()
-            return !call.elements(0).contains { Self.contains(items, $0) }
+            return try !Self.collectionArgument(call).contains { Self.contains(items, $0) }
         }
         add(["count"], arity: 1...1) { call in
             call.receiverElements().filter { AQLValues.areEqual($0, call.argument(0)) }.count
@@ -302,17 +342,28 @@ public struct AQLCollectionServices: AQLServiceProvider {
             Self.result(call.receiverElements().filter { !AQLValues.areEqual($0, call.argument(0)) }, of: call)
         }
         add(["union"], arity: 1...1) { call in
-            Self.result(AQLValues.distinct(call.receiverElements() + call.elements(0)), of: call)
+            let other = try Self.collectionArgument(call)
+            if call.context.options.strict,
+                call.receiverKind.isUnique != call.context.collectionKind(of: call.argument(0)).isUnique
+            {
+                throw AQLExecutionError.typeError("union requires two sequences or two sets")
+            }
+            let items = call.receiverElements() + other
+            let keepsRepeats = !call.receiverKind.isUnique && call.context.options.sequenceUnion == .concatenation
+            return Self.result(keepsRepeats ? items : AQLValues.distinct(items), of: call)
         }
         add(["concat", "addAll", "+"], arity: 1...1) { call in
-            Self.result(call.receiverElements() + call.elements(0), of: call)
+            Self.result(call.receiverElements() + (try Self.collectionArgument(call)), of: call)
+        }
+        add(["add"], arity: 1...1) { call in
+            try AQLBinaryExpression.addition(call.receiver, call.argument(0), in: call.context)
         }
         add(["intersection"], arity: 1...1) { call in
-            let other = call.elements(0)
+            let other = try Self.collectionArgument(call)
             return Self.result(call.receiverElements().filter { Self.contains(other, $0) }, of: call)
         }
         add(["sub", "difference", "removeAll"], arity: 1...1) { call in
-            let other = call.elements(0)
+            let other = try Self.collectionArgument(call)
             return Self.result(call.receiverElements().filter { !Self.contains(other, $0) }, of: call)
         }
         add(["insertAt"], arity: 2...2) { call in

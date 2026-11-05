@@ -5,6 +5,7 @@
 //  Created by Rene Hexel on 28/12/2025.
 //  Copyright (c) 2025 Rene Hexel. All rights reserved.
 //
+import ECore
 import EMFBase
 import Foundation
 
@@ -28,7 +29,25 @@ import Foundation
 /// - `and`, `or`, `implies`, `xor`
 ///
 /// ### String
-/// - `+` (concat) - String concatenation
+/// - `+` (add) - If either operand is a string, the text of both operands joined, as in
+///   `'times ' + 42` (`'times 42'`); a collection contributes the text of its elements
+///   without separators, as in `'x' + Sequence{'a', 'b'}` (`'xab'`), unless the
+///   ``AQLOptions/textForm`` of the context is ``AQLTextForm/bracketed``
+///
+/// ### Collection
+/// - `+` (add) - Concatenation into a collection of the kind of the left operand, as
+///   `concat` does: `Sequence{'a'} + Sequence{'a'}` is `Sequence{'a', 'a'}`, while
+///   `OrderedSet{'a'} + Sequence{'a'}` is `OrderedSet{'a'}`
+/// - `-` (sub) - The elements of the left operand that the right operand does not hold, in
+///   a collection of the kind of the left operand: `Sequence{'a', 'b', 'a'} - Sequence{'a'}`
+///   is `Sequence{'b'}`
+///
+/// Adding a collection to a value that is neither a collection nor a string, or subtracting
+/// anything other than a collection from a collection, is a type error. A null operand of
+/// `+` counts as empty text, so that `'x' + null` and `null + 'x'` are `'x'` and
+/// `null + null` is `''`, unless the ``AQLOptions/nullAddition`` of the context is
+/// ``AQLNullAddition/null``, which makes the result null. Any other arithmetic or comparison
+/// operator with a null operand yields null.
 ///
 /// ## Example Usage
 ///
@@ -150,12 +169,14 @@ public struct AQLBinaryExpression: AQLExpression {
                 return evaluateEquals(leftValue, rightValue)
             case .notEquals:
                 return !evaluateEquals(leftValue, rightValue)
+            case .add:
+                return try Self.addition(leftValue, rightValue, in: context)
             default:
                 // Arithmetic and comparison require non-null operands
                 guard let leftValue = leftValue, let rightValue = rightValue else {
                     return nil
                 }
-                return try evaluateNonNull(leftValue, rightValue)
+                return try evaluateNonNull(leftValue, rightValue, in: context)
             }
         }
     }
@@ -278,14 +299,15 @@ public struct AQLBinaryExpression: AQLExpression {
     // MARK: - Non-Null Operations
 
     /// Evaluates operations that require non-null operands.
-    private func evaluateNonNull(_ left: any EcoreValue, _ right: any EcoreValue) throws -> (
-        any EcoreValue
-    )? {
+    @MainActor
+    private func evaluateNonNull(
+        _ left: any EcoreValue, _ right: any EcoreValue, in context: AQLExecutionContext
+    ) throws -> (any EcoreValue)? {
         switch op {
         case .add:
-            return try evaluateAdd(left, right)
+            return try Self.sum(left, right, in: context)
         case .subtract:
-            return try evaluateSubtract(left, right)
+            return try Self.difference(left, right, in: context)
         case .multiply:
             return try evaluateMultiply(left, right)
         case .divide:
@@ -309,13 +331,55 @@ public struct AQLBinaryExpression: AQLExpression {
 
     // MARK: - Arithmetic Operations
 
-    /// Addition or string concatenation.
-    private func evaluateAdd(_ left: any EcoreValue, _ right: any EcoreValue) throws -> (
-        any EcoreValue
-    ) {
-        // String concatenation
-        if let leftStr = left as? String, let rightStr = right as? String {
-            return leftStr + rightStr
+    /// The value of `left + right`, which the `add` services also compute.
+    ///
+    /// A null operand counts as empty text while the ``AQLOptions/nullAddition`` of the
+    /// context is ``AQLNullAddition/emptyText``, so that the result is the text of the other
+    /// operand; otherwise it makes the result null. Two operands that are not null combine
+    /// as ``sum(_:_:in:)`` describes.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand.
+    ///   - right: The right operand.
+    ///   - context: The context whose options apply.
+    /// - Returns: The sum, concatenated text or concatenated collection, or null.
+    /// - Throws: ``AQLExecutionError/typeError(_:)`` for operands that cannot be added.
+    @MainActor
+    static func addition(
+        _ left: (any EcoreValue)?, _ right: (any EcoreValue)?, in context: AQLExecutionContext
+    ) throws -> (any EcoreValue)? {
+        guard let left, let right else {
+            guard context.options.nullAddition == .emptyText else { return nil }
+            let emptyText: any EcoreValue = ""
+            return try sum(left ?? emptyText, right ?? emptyText, in: context)
+        }
+        return try sum(left, right, in: context)
+    }
+
+    /// The value of `left + right` for operands that are not null.
+    ///
+    /// If either operand is a string, the result is the text of the left operand followed by
+    /// that of the right one, in the ``AQLOptions/textForm`` of the context. Otherwise two
+    /// collections are concatenated into a collection of the kind of the left operand, so
+    /// that an ordered set or a set leaves out elements it already holds, and two numbers
+    /// are added.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand.
+    ///   - right: The right operand.
+    ///   - context: The context whose options shape the result.
+    /// - Returns: The sum, concatenated text or concatenated collection.
+    /// - Throws: ``AQLExecutionError/typeError(_:)`` for any other combination of operands.
+    @MainActor
+    private static func sum(
+        _ left: any EcoreValue, _ right: any EcoreValue, in context: AQLExecutionContext
+    ) throws -> any EcoreValue {
+        if left is String || right is String {
+            let form = context.options.textForm
+            return form.text(of: left) + form.text(of: right)
+        }
+        if let leftItems = AQLValues.elements(of: left), let rightItems = AQLValues.elements(of: right) {
+            return context.collection(leftItems + rightItems, kind: context.collectionKind(of: left))
         }
 
         // Numeric addition
@@ -323,21 +387,38 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt + rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble + rightDouble
         }
 
         throw AQLExecutionError.typeError("Cannot add \(type(of: left)) and \(type(of: right))")
     }
 
-    private func evaluateSubtract(_ left: any EcoreValue, _ right: any EcoreValue) throws -> (
-        any EcoreValue
-    ) {
+    /// The value of `left - right`.
+    ///
+    /// For two collections, the result holds the elements of the left operand that the right
+    /// operand does not hold, every occurrence of them included, in a collection of the kind
+    /// of the left operand. Two numbers are subtracted.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand.
+    ///   - right: The right operand.
+    ///   - context: The context whose options shape a collection result.
+    /// - Returns: The difference.
+    /// - Throws: ``AQLExecutionError/typeError(_:)`` for any other combination of operands.
+    @MainActor
+    static func difference(
+        _ left: any EcoreValue, _ right: any EcoreValue, in context: AQLExecutionContext
+    ) throws -> any EcoreValue {
+        if let leftItems = AQLValues.elements(of: left), let rightItems = AQLValues.elements(of: right) {
+            let remaining = leftItems.filter { item in !rightItems.contains { AQLValues.areEqual($0, item) } }
+            return context.collection(remaining, kind: context.collectionKind(of: left))
+        }
         if let leftInt = left as? Int, let rightInt = right as? Int {
             return leftInt - rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble - rightDouble
         }
 
@@ -352,7 +433,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt * rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble * rightDouble
         }
 
@@ -370,7 +451,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt / rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             guard rightDouble != 0 else {
                 throw AQLExecutionError.invalidOperation("Division by zero")
             }
@@ -415,7 +496,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt < rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble < rightDouble
         }
 
@@ -433,7 +514,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt > rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble > rightDouble
         }
 
@@ -451,7 +532,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt <= rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble <= rightDouble
         }
 
@@ -470,7 +551,7 @@ public struct AQLBinaryExpression: AQLExpression {
             return leftInt >= rightInt
         }
 
-        if let leftDouble = asDouble(left), let rightDouble = asDouble(right) {
+        if let leftDouble = Self.asDouble(left), let rightDouble = Self.asDouble(right) {
             return leftDouble >= rightDouble
         }
 
@@ -485,7 +566,7 @@ public struct AQLBinaryExpression: AQLExpression {
     // MARK: - Helpers
 
     /// Attempts to convert a value to Double.
-    private func asDouble(_ value: any EcoreValue) -> Double? {
+    private static func asDouble(_ value: any EcoreValue) -> Double? {
         if let doubleValue = value as? Double {
             return doubleValue
         }

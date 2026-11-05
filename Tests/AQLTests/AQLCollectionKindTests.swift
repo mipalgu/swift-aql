@@ -253,8 +253,15 @@ struct AQLCollectionKindTests {
 
     @Test("The textual form does not depend on the kind", arguments: EcoreCollectionKind.allCases)
     func textualForm(_ kind: EcoreCollectionKind) async throws {
-        let result = try await Self.value(of: "\(kind.rawValue){'a', 'b'}.toString()")
+        let result = try await Self.value(
+            of: "\(kind.rawValue){'a', 'b'}.toString()", in: makeContext(options: AQLOptions(textForm: .bracketed)))
         #expect(result as? String == "[a, b]")
+    }
+
+    @Test("The joined text does not depend on the kind", arguments: EcoreCollectionKind.allCases)
+    func joinedText(_ kind: EcoreCollectionKind) async throws {
+        let result = try await Self.value(of: "\(kind.rawValue){'a', 'b'}.toString()")
+        #expect(result as? String == "ab")
     }
 
     // MARK: Implicit collections

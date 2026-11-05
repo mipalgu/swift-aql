@@ -19,6 +19,10 @@ import Foundation
 /// Containment queries that need to look upwards (`eContainer`, `ancestors`, `siblings`,
 /// `eInverse`) search the resources registered with ``AQLExecutionContext/addResource(_:)``,
 /// finding containers as ``AQLOptions/containerLookup`` says.
+///
+/// `toString` gives the text of its receiver in the ``AQLOptions/textForm`` of the context: by
+/// default the text of a collection joins the text of its elements without separators, as
+/// in `Sequence{'a', 'b'}->toString()` (`'ab'`), and null has no text.
 public struct AQLObjectServices: AQLServiceProvider {
     /// Creates the provider.
     public init() {}
@@ -37,7 +41,7 @@ public struct AQLObjectServices: AQLServiceProvider {
                 _ = try call.type(0)
                 return call.receiver
             },
-            AQLService("toString") { AQLValues.description(of: $0.receiver) },
+            AQLService("toString") { $0.context.options.textForm.text(of: $0.receiver) },
             AQLService("equals", arity: 1) { AQLValues.areEqual($0.receiver, $0.argument(0)) },
             AQLService("differs", arity: 1) { !AQLValues.areEqual($0.receiver, $0.argument(0)) },
             AQLService("lineSeparator") { _ in "\n" },

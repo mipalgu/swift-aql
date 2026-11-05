@@ -40,6 +40,22 @@ may be asynchronous and use `call.context` to navigate the model. Iterator
 arguments (`x | body`) arrive as `AQLLambda` values, and type arguments
 (`ecore::EClass`) as `AQLTypeDescriptor` values.
 
+As in Eclipse AQL, `+` and `-` also apply to collections, and `+` joins any value to a
+string, with null counting as empty text. They compute the `add` and `sub` services:
+
+```aql
+Sequence{'a', 'b'} + Sequence{'b', 'c'}      -- Sequence{'a', 'b', 'b', 'c'}
+OrderedSet{'a', 'b'} + Sequence{'b', 'c'}    -- OrderedSet{'a', 'b', 'c'}
+Sequence{'a', 'b', 'a'} - Sequence{'a'}      -- Sequence{'b'}
+'x' + Sequence{'a', 'b'}                     -- 'xab'
+'times ' + 42                                -- 'times 42'
+'x' + null                                   -- 'x'
+Sequence{'a', 'b'} + null                    -- 'ab'
+```
+
+The result of a collection operation has the kind of the left operand, so that an
+ordered set or a set leaves out elements it already holds.
+
 ## Options
 
 An `AQLExecutionContext` evaluates expressions with the `AQLOptions` it holds in its
@@ -60,10 +76,32 @@ let context = AQLExecutionContext(options: options)
 | `collectionKinds` | `.distinguished`: collections are sequences, ordered sets, sets or bags, and operations keep the kind of their receiver | `.sequences`: every collection behaves as a sequence |
 | `singleValueCollections` | `.set`: an arrow call on a single value sees a set (an empty set for `null`) | `.sequence`: it sees a sequence |
 | `containerLookup` | `.resources`: containers are found through the registered resources | `.registeredObjects`: containers are found among the objects the resources list |
+| `sequenceUnion` | `.concatenation`: the `union` of a sequence or a bag keeps repeated elements | `.distinct`: it leaves them out |
+| `nullAddition` | `.emptyText`: a null operand of `+` counts as empty text (`'x' + null` is `'x'`) | `.null`: it makes the result null |
+| `textForm` | `.joined`: the text of a collection joins the text of its elements (`Sequence{'a', 'b'}->toString()` is `'ab'`), and null has no text | `.bracketed`: it is `[a, b]`, and null is `null` |
 
 The raw value of each choice is its command-line spelling (for example `first-element`
 or `registered-objects`), so that tools can parse it with `init(rawValue:)` and list the
 choices through `allCases`.
+
+`strict` is off in both `.standard` and `.legacy`. Turning it on makes the collection
+services reject, with `AQLExecutionError.typeError`, the calls for which Eclipse AQL has
+no service, rather than accepting them:
+
+- `union` of a sequence or a bag with an ordered set or a set (an arrow call on a single
+  value sees a set, so `'a'->union(Sequence{'b'})` is rejected), and
+- `union`, `concat` (`addAll`), `sub` (`difference`, `removeAll`), `intersection`,
+  `includesAll` and `excludesAll` with an argument that is not a collection, null
+  included. Outside strict mode such an argument counts as a collection holding it, and
+  null as an empty collection.
+
+While `collectionKinds` is `.sequences`, every collection is a sequence, so no `union` is
+rejected for the kinds of its collections.
+
+```swift
+var options = AQLOptions.standard
+options.strict = true
+```
 
 `AQLOptions(semantics:)` selects `.standard` or `.legacy` from a `ModellingSemantics`
 value, and `AQLOptions.fromEnvironment()` reads that choice from the
@@ -107,6 +145,17 @@ The behaviours that changed are:
   the same object, the first resource that knows a container answers, and within a
   resource the first claiming object; 0.6 took the last claim it found. Option
   `containerLookup`; use `.registeredObjects` for the 0.6 behaviour.
+- **Union of sequences**: `Sequence{'a', 'b'}->union(Sequence{'b', 'c'})` now yields
+  `Sequence{'a', 'b', 'b', 'c'}`, as in Eclipse AQL; 0.6 left out repeated elements for
+  every kind. The union of an ordered set or a set still leaves them out. Option
+  `sequenceUnion`; use `.distinct` for the 0.6 behaviour.
+- **Null in `+`**: `'x' + null` and `null + 'x'` now yield `'x'`, `null + null` yields
+  `''`, and `Sequence{'a', 'b'} + null` yields `'ab'`, as in Eclipse AQL; in 0.6 a null
+  operand made the result null. Option `nullAddition`; use `.null` for the 0.6 behaviour.
+- **Text of collections**: `Sequence{'a', Sequence{'b'}}->toString()` now yields `'ab'`,
+  joining the text of the elements as Eclipse AQL does, and `null.toString()` yields `''`;
+  0.6 yielded `'[a, [b]]'` and `'null'`. `+` joins collections to strings in the same
+  form. Option `textForm`; use `.bracketed` for the 0.6 behaviour.
 
 `AQLService` gained `modifiesModels` and `invoke(_:)`, and `AQLServiceCall` gained
 `receiverKind`; the 0.6 initialisers of `AQLService` remain and create services that do

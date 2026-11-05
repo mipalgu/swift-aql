@@ -109,6 +109,87 @@ public enum AQLContainerLookup: String, Sendable, CaseIterable, Hashable {
     case registeredObjects = "registered-objects"
 }
 
+/// Whether `union` keeps repeated elements when its receiver is a sequence or a bag.
+///
+/// A union whose receiver is an ordered set or a set leaves out repeated elements under
+/// either choice.
+///
+/// The raw value of each case is its lower-case, hyphenated command-line spelling, so that
+/// a tool can parse an option with ``init(rawValue:)`` and list the accepted spellings
+/// through `allCases`.
+public enum AQLSequenceUnion: String, Sendable, CaseIterable, Hashable {
+    /// The union of a sequence or a bag holds every element of both collections.
+    ///
+    /// `Sequence{'a', 'b'}->union(Sequence{'b', 'c'})` yields
+    /// `Sequence{'a', 'b', 'b', 'c'}`, as `Sequence{'a', 'b'} + Sequence{'b', 'c'}` does.
+    /// This is the default.
+    case concatenation
+
+    /// The union of a sequence or a bag leaves out repeated elements.
+    ///
+    /// `Sequence{'a', 'b'}->union(Sequence{'b', 'c'})` yields `Sequence{'a', 'b', 'c'}`, and
+    /// `Sequence{'a', 'a'}->union(Sequence{})` yields `Sequence{'a'}`. This is the behaviour
+    /// of version 0.6.
+    case distinct
+}
+
+/// What `+` and the `add` services make of a null operand.
+///
+/// The raw value of each case is its lower-case, hyphenated command-line spelling, so that
+/// a tool can parse an option with ``init(rawValue:)`` and list the accepted spellings
+/// through `allCases`.
+public enum AQLNullAddition: String, Sendable, CaseIterable, Hashable {
+    /// A null operand counts as empty text, so the result is the text of the other operand.
+    ///
+    /// `'x' + null` and `null + 'x'` yield `'x'`, `null + null` yields `''`,
+    /// `Sequence{'a', 'b'} + null` yields the text of the sequence (`'ab'`), and `null + 1`
+    /// yields `'1'`. This is the default.
+    case emptyText = "empty-text"
+
+    /// A null operand makes the result null.
+    ///
+    /// `'x' + null` yields null. This is the behaviour of version 0.6.
+    case null
+}
+
+/// The text of a value, as `toString()` gives it and `+` joins it to a string.
+///
+/// Under either choice, a string is its own text, and numbers, booleans and objects have the
+/// text that `AQLValues/description(of:)` gives them.
+///
+/// The raw value of each case is its lower-case, hyphenated command-line spelling, so that
+/// a tool can parse an option with ``init(rawValue:)`` and list the accepted spellings
+/// through `allCases`.
+public enum AQLTextForm: String, Sendable, CaseIterable, Hashable {
+    /// The text of a collection joins the text of its elements without separators.
+    ///
+    /// Nested collections contribute the text of their elements in turn, and null has no
+    /// text: `Sequence{'a', Sequence{'b', 1}}->toString()` yields `'ab1'`, and
+    /// `null.toString()` yields `''`. This is the default.
+    case joined
+
+    /// The text of a collection lists the text of its elements in brackets.
+    ///
+    /// `Sequence{'a', Sequence{'b', 1}}->toString()` yields `'[a, [b, 1]]'`, and
+    /// `null.toString()` yields `'null'`. This is the behaviour of version 0.6.
+    case bracketed
+
+    /// The text of a value in this form.
+    ///
+    /// - Parameter value: The value to format.
+    /// - Returns: The text of the value.
+    func text(of value: (any EcoreValue)?) -> String {
+        switch self {
+        case .bracketed:
+            return AQLValues.description(of: value)
+        case .joined:
+            guard let value else { return "" }
+            if let items = AQLValues.elements(of: value) { return items.map { text(of: $0) }.joined() }
+            return AQLValues.description(of: value)
+        }
+    }
+}
+
 /// Options that choose between the current behaviour of AQL evaluation and that of
 /// version 0.6.
 ///
@@ -123,6 +204,9 @@ public enum AQLContainerLookup: String, Sendable, CaseIterable, Hashable {
 /// options.collectionArguments = .firstElement
 /// let context = AQLExecutionContext(options: options)
 /// ```
+///
+/// ``strict`` is the exception: both presets leave it off, and turning it on makes the
+/// collection services reject the arguments that Eclipse AQL rejects.
 public struct AQLOptions: Sendable, Equatable, Hashable {
     /// How `including`, `append` and `prepend` add an argument that is a collection.
     public var collectionArguments: AQLCollectionArguments
@@ -139,6 +223,34 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     /// How containment queries find the container of an object.
     public var containerLookup: AQLContainerLookup
 
+    /// Whether `union` keeps repeated elements when its receiver is a sequence or a bag.
+    public var sequenceUnion: AQLSequenceUnion
+
+    /// What `+` and the `add` services make of a null operand.
+    public var nullAddition: AQLNullAddition
+
+    /// The text of a value, as `toString()` gives it and `+` joins it to a string.
+    public var textForm: AQLTextForm
+
+    /// Whether collection services reject the arguments that Eclipse AQL rejects.
+    ///
+    /// Outside strict mode, which is the default of both ``standard`` and ``legacy``, the
+    /// collection services accept some arguments for which Eclipse AQL has no service. In
+    /// strict mode, they raise ``AQLExecutionError/typeError(_:)`` for them instead:
+    ///
+    /// - `union` with an argument whose kind does not match its receiver: a sequence or a
+    ///   bag with an ordered set or a set, or an ordered set or a set with a sequence or a
+    ///   bag. A value that is not a collection becomes a set for an arrow call (see
+    ///   ``singleValueCollections``), so `'a'->union(Sequence{'b'})` is rejected.
+    /// - `union`, `concat` (`addAll`), `sub` (`difference`, `removeAll`), `intersection`,
+    ///   `includesAll` and `excludesAll` with an argument that is not a collection,
+    ///   null included. Outside strict mode, such an argument counts as a collection holding
+    ///   it, and null as an empty collection.
+    ///
+    /// While ``collectionKinds`` is ``AQLCollectionKinds/sequences``, every collection is a
+    /// sequence, so that no union is rejected for the kinds of its collections.
+    public var strict: Bool
+
     /// Creates options, by default those of ``standard``.
     ///
     /// - Parameters:
@@ -150,34 +262,56 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     ///     (default: ``AQLSingleValueCollections/set``).
     ///   - containerLookup: How containment queries find containers (default:
     ///     ``AQLContainerLookup/resources``).
+    ///   - sequenceUnion: Whether the union of a sequence or a bag keeps repeated elements
+    ///     (default: ``AQLSequenceUnion/concatenation``).
+    ///   - nullAddition: What `+` makes of a null operand (default:
+    ///     ``AQLNullAddition/emptyText``).
+    ///   - textForm: The text of values (default: ``AQLTextForm/joined``).
+    ///   - strict: Whether collection services reject the arguments that Eclipse AQL rejects
+    ///     (default: `false`).
     public init(
         collectionArguments: AQLCollectionArguments = .whole,
         collectionKinds: AQLCollectionKinds = .distinguished,
         singleValueCollections: AQLSingleValueCollections = .set,
-        containerLookup: AQLContainerLookup = .resources
+        containerLookup: AQLContainerLookup = .resources,
+        sequenceUnion: AQLSequenceUnion = .concatenation,
+        nullAddition: AQLNullAddition = .emptyText,
+        textForm: AQLTextForm = .joined,
+        strict: Bool = false
     ) {
         self.collectionArguments = collectionArguments
         self.collectionKinds = collectionKinds
         self.singleValueCollections = singleValueCollections
         self.containerLookup = containerLookup
+        self.sequenceUnion = sequenceUnion
+        self.nullAddition = nullAddition
+        self.textForm = textForm
+        self.strict = strict
     }
 
     /// The default options.
     ///
     /// Collection arguments are added whole, collections keep their kind, an arrow call sees
-    /// a single value as a set, and containers are found through the registered resources.
+    /// a single value as a set, containers are found through the registered resources, the
+    /// union of a sequence or a bag keeps repeated elements, `+` counts null as empty text,
+    /// and the text of a collection joins the text of its elements. Strict mode is off.
     public static let standard = AQLOptions()
 
     /// The options that reproduce the behaviour of version 0.6.
     ///
     /// Only the first element of a collection argument is added, every collection behaves
-    /// as a sequence, an arrow call sees a single value as a sequence, and containers are
-    /// found among the objects that the registered resources list.
+    /// as a sequence, an arrow call sees a single value as a sequence, containers are found
+    /// among the objects that the registered resources list, a union leaves out repeated
+    /// elements, `+` with a null operand yields null, and the text of a collection lists the
+    /// text of its elements in brackets. Strict mode is off, as for ``standard``.
     public static let legacy = AQLOptions(
         collectionArguments: .firstElement,
         collectionKinds: .sequences,
         singleValueCollections: .sequence,
-        containerLookup: .registeredObjects
+        containerLookup: .registeredObjects,
+        sequenceUnion: .distinct,
+        nullAddition: .null,
+        textForm: .bracketed
     )
 
     /// Creates the options that a choice of semantics selects.

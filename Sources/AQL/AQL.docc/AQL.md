@@ -62,6 +62,9 @@ let result = try await query.evaluate(in: context, self: myClass)
 - ``AQLCollectionKinds``
 - ``AQLSingleValueCollections``
 - ``AQLContainerLookup``
+- ``AQLSequenceUnion``
+- ``AQLNullAddition``
+- ``AQLTextForm``
 
 ### Expressions
 
