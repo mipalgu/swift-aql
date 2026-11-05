@@ -104,6 +104,10 @@ struct AQLOptionsTests {
         #expect(options.collectionKinds == .distinguished)
         #expect(options.singleValueCollections == .set)
         #expect(options.containerLookup == .resources)
+        #expect(options.sequenceUnion == .concatenation)
+        #expect(options.nullAddition == .emptyText)
+        #expect(options.textForm == .joined)
+        #expect(!options.strict)
     }
 
     @Test("The legacy options select the behaviour of version 0.6")
@@ -113,12 +117,17 @@ struct AQLOptionsTests {
         #expect(options.collectionKinds == .sequences)
         #expect(options.singleValueCollections == .sequence)
         #expect(options.containerLookup == .registeredObjects)
+        #expect(options.sequenceUnion == .distinct)
+        #expect(options.nullAddition == .null)
+        #expect(options.textForm == .bracketed)
+        #expect(!options.strict)
         #expect(options != .standard)
         #expect(
             options
                 == AQLOptions(
                     collectionArguments: .firstElement, collectionKinds: .sequences,
-                    singleValueCollections: .sequence, containerLookup: .registeredObjects))
+                    singleValueCollections: .sequence, containerLookup: .registeredObjects,
+                    sequenceUnion: .distinct, nullAddition: .null, textForm: .bracketed))
     }
 
     @Test("Options can be changed one at a time")
@@ -129,7 +138,15 @@ struct AQLOptionsTests {
         options.collectionKinds = .sequences
         options.singleValueCollections = .sequence
         options.containerLookup = .registeredObjects
+        #expect(options != .legacy)
+        options.sequenceUnion = .distinct
+        options.nullAddition = .null
+        #expect(options != .legacy)
+        options.textForm = .bracketed
         #expect(options == .legacy)
+        options.strict = true
+        #expect(options != .legacy)
+        #expect(AQLOptions(strict: true) != .standard)
         #expect(Set([AQLOptions.standard, .legacy, AQLOptions()]).count == 2)
     }
 
@@ -139,6 +156,11 @@ struct AQLOptionsTests {
         #expect(AQLCollectionKinds.allCases.map(\.rawValue) == ["distinguished", "sequences"])
         #expect(AQLSingleValueCollections.allCases.map(\.rawValue) == ["set", "sequence"])
         #expect(AQLContainerLookup.allCases.map(\.rawValue) == ["resources", "registered-objects"])
+        #expect(AQLSequenceUnion.allCases.map(\.rawValue) == ["concatenation", "distinct"])
+        #expect(AQLSequenceUnion(rawValue: "distinct") == .distinct)
+        #expect(AQLNullAddition.allCases.map(\.rawValue) == ["empty-text", "null"])
+        #expect(AQLTextForm.allCases.map(\.rawValue) == ["joined", "bracketed"])
+        #expect(AQLNullAddition(rawValue: "empty-text") == .emptyText)
         #expect(AQLCollectionArguments(rawValue: "first-element") == .firstElement)
         #expect(AQLContainerLookup(rawValue: "registered-objects") == .registeredObjects)
         #expect(AQLCollectionKinds(rawValue: "Sequences") == nil)
@@ -241,6 +263,15 @@ struct AQLOptionsTests {
             "OrderedSet{'a', 'b'}->collect(s | Sequence{s, 'a'})",
             legacy: "Sequence{'a', 'a', 'b', 'a'}", standard: "OrderedSet{'a', 'b'}"),
         .init("OrderedSet{'a', 'b'}->union(Sequence{'c', 'c'})", legacy: "Sequence{'a', 'b', 'c'}", standard: "OrderedSet{'a', 'b', 'c'}"),
+        .init("Sequence{'a', 'b'}->union(Sequence{'b', 'c'})", legacy: "Sequence{'a', 'b', 'c'}", standard: "Sequence{'a', 'b', 'b', 'c'}"),
+        .init("Sequence{'a', 'a'}->union(Sequence{})", legacy: "Sequence{'a'}", standard: "Sequence{'a', 'a'}"),
+        .init("Bag{'a'}->union(OrderedSet{'a'})", legacy: "Sequence{'a'}", standard: "Bag{'a', 'a'}"),
+        .init("Sequence{'a', 'b'} + Sequence{'b'}", both: "Sequence{'a', 'b', 'b'}"),
+        .init("OrderedSet{'a', 'b'} + Sequence{'b', 'c'}", legacy: "Sequence{'a', 'b', 'b', 'c'}", standard: "OrderedSet{'a', 'b', 'c'}"),
+        .init("Sequence{'a', 'b', 'a'} - Sequence{'a'}", both: "Sequence{'b'}"),
+        .init("Sequence{'a', 'b'} + 'c'", legacy: "'[a, b]c'", standard: "'abc'"),
+        .init("'x' + Sequence{'a', Sequence{'b'}}", legacy: "'x[a, [b]]'", standard: "'xab'"),
+        .init("'x' + 1", both: "'x1'"),
         .init("OrderedSet{1, 1, 2}", legacy: "Sequence{1, 2}", standard: "OrderedSet{1, 2}"),
         .init("Set{1, 1, 2}", legacy: "Sequence{1, 2}", standard: "Set{1, 2}"),
         .init("Bag{1, 1, 2}", legacy: "Sequence{1, 1, 2}", standard: "Bag{1, 1, 2}"),
@@ -271,6 +302,25 @@ struct AQLOptionsTests {
         .init("Sequence{x, y}.name", both: "Sequence{'n', 'n'}"),
     ]
 
+    /// Null operands of `+` and `add`, and the text of values.
+    nonisolated static let textExamples: [CompatibilityExample] = [
+        .init("'x' + null", legacy: "null", standard: "'x'"),
+        .init("null + 'x'", legacy: "null", standard: "'x'"),
+        .init("null + null", legacy: "null", standard: "''"),
+        .init("Sequence{'a', 'b'} + null", legacy: "null", standard: "'ab'"),
+        .init("null + Sequence{'a', 'b'}", legacy: "null", standard: "'ab'"),
+        .init("null + 1", legacy: "null", standard: "'1'"),
+        .init("Sequence{'a'}.add(null)", legacy: "null", standard: "'a'"),
+        .init("'a'.add(null)", legacy: "null", standard: "'a'"),
+        .init("Sequence{'a', 'b'}->toString()", legacy: "'[a, b]'", standard: "'ab'"),
+        .init("Sequence{'a', Sequence{'b', 'c'}}.toString()", legacy: "'[a, [b, c]]'", standard: "'abc'"),
+        .init("Sequence{}.toString()", legacy: "'[]'", standard: "''"),
+        .init("null.toString()", legacy: "'null'", standard: "''"),
+        .init("Sequence{1, 2}.toString().size()", legacy: "6", standard: "2"),
+        .init("1 + 2", both: "3"),
+        .init("Sequence{'a'} - null", both: "null"),
+    ]
+
     /// Arrow calls on values that are not collections.
     nonisolated static let singleValueExamples: [CompatibilityExample] = [
         .init("'a'->including('a')", legacy: "Sequence{'a', 'a'}", standard: "Set{'a'}"),
@@ -285,7 +335,8 @@ struct AQLOptionsTests {
     ]
 
     /// All examples evaluated under both presets.
-    nonisolated static let allExamples = collectionArgumentExamples + collectionKindExamples + singleValueExamples
+    nonisolated static let allExamples =
+        collectionArgumentExamples + collectionKindExamples + singleValueExamples + textExamples
 
     @Test("The legacy options compute the values of version 0.6.1, all as sequences", arguments: allExamples)
     func legacyValues(_ example: CompatibilityExample) async throws {
@@ -324,6 +375,22 @@ struct AQLOptionsTests {
         (AQLOptions(singleValueCollections: .sequence), "null->including('a')", "Sequence{'a'}"),
         (AQLOptions(singleValueCollections: .sequence), "OrderedSet{'a'}->including('a')", "OrderedSet{'a'}"),
         (AQLOptions(containerLookup: .registeredObjects), "OrderedSet{'a', 'b'}->append('a')", "OrderedSet{'b', 'a'}"),
+        (AQLOptions(sequenceUnion: .distinct), "Sequence{'a', 'b'}->union(Sequence{'b', 'c'})", "Sequence{'a', 'b', 'c'}"),
+        (AQLOptions(sequenceUnion: .distinct), "Bag{'a', 'a'}->union(Bag{'b'})", "Bag{'a', 'b'}"),
+        (AQLOptions(sequenceUnion: .distinct), "Sequence{'a'} + Sequence{'a'}", "Sequence{'a', 'a'}"),
+        (AQLOptions(sequenceUnion: .distinct), "OrderedSet{'a', 'b'}->append('a')", "OrderedSet{'b', 'a'}"),
+        (AQLOptions(collectionKinds: .sequences), "OrderedSet{'a'}->union(OrderedSet{'a', 'b'})", "Sequence{'a', 'a', 'b'}"),
+        (AQLOptions(collectionKinds: .sequences), "Sequence{'a'}->union(Sequence{'a'})", "Sequence{'a', 'a'}"),
+        (AQLOptions(nullAddition: .null), "'x' + null", "null"),
+        (AQLOptions(nullAddition: .null), "Sequence{'a'}->add(null)", "null"),
+        (AQLOptions(nullAddition: .null), "Sequence{'a'}->toString()", "'a'"),
+        (AQLOptions(textForm: .bracketed), "Sequence{'a', 'b'}->toString()", "'[a, b]'"),
+        (AQLOptions(textForm: .bracketed), "'x' + Sequence{'a', 'b'}", "'x[a, b]'"),
+        (AQLOptions(textForm: .bracketed), "Sequence{'a'} + null", "'[a]'"),
+        (AQLOptions(textForm: .bracketed), "'x' + null", "'x'"),
+        (AQLOptions(textForm: .bracketed), "null + null", "''"),
+        (AQLOptions(textForm: .bracketed), "null.toString()", "'null'"),
+        (AQLOptions(strict: true), "Sequence{'a'}->union(Sequence{'a'})", "Sequence{'a', 'a'}"),
     ]
 
     @Test("Each option changes only its own behaviour", arguments: singleOptionExamples.indices)

@@ -124,9 +124,24 @@ Sequence{'a', 'b', 'c'}->append('b')        -- Sequence{'a', 'b', 'c', 'b'}
 | Operation | Description | Example |
 |-----------|-------------|---------|
 | `union(other)` | Combine collections | `col1->union(col2)` |
+| `concat(other)`, `add(other)`, `+` | Append the elements of a collection | `col1 + col2` |
+| `sub(other)`, `-` | Remove every occurrence of the elements of a collection | `col1 - col2` |
 | `intersection(other)` | Common elements | `col1->intersection(col2)` |
-| `excluding(elem)` | Remove specific element | `col->excluding(elem)` |
+| `excluding(elem)` | Remove every occurrence of an element | `col->excluding(elem)` |
 | `including(elem)` | Add element | `col->including(elem)` |
+
+Each of these yields a collection of the kind of its receiver (the left operand of `+` and
+`-`). A sequence or a bag keeps repeated elements and an ordered set or a set leaves them
+out, so that `union`, `concat`, `add` and `+` agree:
+
+```aql
+Sequence{'a', 'b'}->union(Sequence{'b', 'c'})     -- Sequence{'a', 'b', 'b', 'c'}
+Sequence{'a', 'b'} + OrderedSet{'b', 'c'}         -- Sequence{'a', 'b', 'b', 'c'}
+OrderedSet{'a', 'b'}->union(OrderedSet{'b', 'c'}) -- OrderedSet{'a', 'b', 'c'}
+OrderedSet{'a', 'b'} + Sequence{'b', 'c'}         -- OrderedSet{'a', 'b', 'c'}
+Sequence{'a', 'b', 'a'} - Sequence{'a'}           -- Sequence{'b'}
+Sequence{'a', 'b', 'a'}->intersection(Sequence{'a'}) -- Sequence{'a', 'a'}
+```
 
 ### Aggregation
 
@@ -143,6 +158,8 @@ Sequence{'a', 'b', 'c'}->append('b')        -- Sequence{'a', 'b', 'c', 'b'}
 | `toUpper()` | Uppercase | `name.toUpper()` |
 | `toLower()` | Lowercase | `name.toLower()` |
 | `concat(str)` | Concatenate | `name.concat('.swift')` |
+| `+`, `add(value)` | Append the text of any value (null has no text) | `'times ' + 42` |
+| `toString()` | The text of any value; a collection joins the text of its elements | `col->toString()` |
 | `substring(start, end)` | Extract portion | `name.substring(0, 5)` |
 | `size()` | Length | `name.size()` |
 | `startsWith(prefix)` | Check prefix | `name.startsWith('get')` |
@@ -175,7 +192,7 @@ Sequence{'a', 'b', 'c'}->append('b')        -- Sequence{'a', 'b', 'c', 'b'}
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
-| `+` | Addition | `a + b` |
+| `+` | Addition (with a string operand, concatenation of text) | `a + b` |
 | `-` | Subtraction | `a - b` |
 | `*` | Multiplication | `a * b` |
 | `/` | Division | `a / b` |
@@ -311,6 +328,9 @@ can be set on its own:
 | ``AQLOptions/collectionKinds`` | ``AQLCollectionKinds/distinguished`` | ``AQLCollectionKinds/sequences`` |
 | ``AQLOptions/singleValueCollections`` | ``AQLSingleValueCollections/set`` | ``AQLSingleValueCollections/sequence`` |
 | ``AQLOptions/containerLookup`` | ``AQLContainerLookup/resources`` | ``AQLContainerLookup/registeredObjects`` |
+| ``AQLOptions/sequenceUnion`` | ``AQLSequenceUnion/concatenation`` | ``AQLSequenceUnion/distinct`` |
+| ``AQLOptions/nullAddition`` | ``AQLNullAddition/emptyText`` | ``AQLNullAddition/null`` |
+| ``AQLOptions/textForm`` | ``AQLTextForm/joined`` | ``AQLTextForm/bracketed`` |
 
 The options make these differences:
 
@@ -324,6 +344,26 @@ OrderedSet{'a', 'b', 'c'}->append('b')
 'a'->including('a')
     -- set:            Set{'a'}
     -- sequence:       Sequence{'a', 'a'}
+Sequence{'a', 'b'}->union(Sequence{'b', 'c'})
+    -- concatenation:  Sequence{'a', 'b', 'b', 'c'}
+    -- distinct:       Sequence{'a', 'b', 'c'}
+'x' + null
+    -- empty-text:     'x'
+    -- null:           null
+Sequence{'a', Sequence{'b'}}->toString()
+    -- joined:         'ab'
+    -- bracketed:      '[a, [b]]'
+```
+
+``AQLOptions/strict`` is off under both ``AQLOptions/standard`` and ``AQLOptions/legacy``.
+Turning it on makes the collection services raise ``AQLExecutionError/typeError(_:)`` for
+the calls that Eclipse AQL has no service for: a `union` of a sequence or a bag with an
+ordered set or a set, and `union`, `concat`, `sub`, `intersection`, `includesAll` or
+`excludesAll` with an argument that is not a collection, null included:
+
+```aql
+Sequence{'a'}->union(OrderedSet{'b'})   -- Sequence{'a', 'b'}, or an error in strict mode
+Sequence{'a'}->concat('b')              -- Sequence{'a', 'b'}, or an error in strict mode
 ```
 
 With ``AQLContainerLookup/resources``, `eContainer()`, `ancestors()` and the sibling

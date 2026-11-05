@@ -198,9 +198,12 @@ public enum AQLValues {
 
     // MARK: Formatting
 
-    /// Formats a value as text, as `toString()` does.
+    /// Formats a value as text, as `toString()` does in the ``AQLTextForm/bracketed`` form.
     ///
-    /// Null is `null`, collections are `[a, b]`, objects are `ClassName@identifier`.
+    /// Null is `null`, collections are `[a, b]`, objects are `ClassName@identifier`. The
+    /// ``AQLTextForm/joined`` form, the default, uses the same text for strings, numbers,
+    /// booleans and objects, but joins the text of the elements of a collection without
+    /// separators and gives null no text.
     ///
     /// - Parameter value: The value to format.
     /// - Returns: The textual form.

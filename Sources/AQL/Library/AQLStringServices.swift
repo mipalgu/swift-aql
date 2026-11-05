@@ -15,13 +15,18 @@ import Foundation
 /// replacement strings may refer to groups as `$1`.
 ///
 /// Services: `size` (`length`), `toUpperCase` (`toUpper`, `upper`), `toLowerCase` (`toLower`,
-/// `lower`), `toUpperFirst`, `toLowerFirst`, `concat`, `+`, `prefix`, `substring(lower)`,
+/// `lower`), `toUpperFirst`, `toLowerFirst`, `concat`, `+`, `add`, `prefix`, `substring(lower)`,
 /// `substring(lower, upper)` (both bounds inclusive), `replace` (first match of a regular
 /// expression), `replaceAll`, `substitute` (first literal occurrence), `substituteAll`, `index`,
 /// `lastIndex`, `tokenize`, `matches` (whole-string match), `startsWith`, `endsWith`,
 /// `equalsIgnoreCase`, `contains`, `strcmp`, `strstr`, `first(n)`, `last(n)`, `at`, `characters`,
 /// `isAlpha`, `isAlphanum`, `trim`, `toInteger`, `toReal`, `toBoolean`, and
 /// `removeLineSeparators`.
+///
+/// `concat` requires a string argument. `add`, which the `+` operator also computes, accepts any
+/// argument and appends its text in the ``AQLOptions/textForm`` of the context: a number or a
+/// boolean as written, a collection by default as the text of its elements without separators
+/// (`'x'.add(Sequence{'a', 1})` is `'xa1'`), and null by default as no text.
 ///
 /// `replace` and `replaceAll` take a regular expression; `substitute` (`substituteFirst`) and
 /// `substituteAll` treat their first argument and the replacement as literal text, so that
@@ -131,6 +136,9 @@ public struct AQLStringServices: AQLServiceProvider {
         add(["toUpperFirst"]) { Self.capitalise(try $0.receiverString(), upper: true) }
         add(["toLowerFirst"]) { Self.capitalise(try $0.receiverString(), upper: false) }
         add(["concat", "+"], arity: 1...1) { try $0.receiverString() + $0.string(0) }
+        add(["add"], arity: 1...1) { call in
+            try AQLBinaryExpression.addition(try call.receiverString(), call.argument(0), in: call.context)
+        }
         add(["prefix"], arity: 1...1) { try $0.string(0) + $0.receiverString() }
         add(["substring"], arity: 1...2) { call in
             let characters = Array(try call.receiverString())
