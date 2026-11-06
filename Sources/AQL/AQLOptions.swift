@@ -190,6 +190,41 @@ public enum AQLTextForm: String, Sendable, CaseIterable, Hashable {
     }
 }
 
+/// What a call written with a dot (`.`) does when its receiver is a collection.
+///
+/// Navigating a feature without parentheses, such as `objects.name`, applies to each element
+/// of a collection under either choice. Arrow calls (`->`) and operators such as `+` always
+/// apply to the collection itself.
+///
+/// The raw value of each case is its lower-case, hyphenated command-line spelling, so that
+/// a tool can parse an option with ``init(rawValue:)`` and list the accepted spellings
+/// through `allCases`.
+public enum AQLDotCalls: String, Sendable, CaseIterable, Hashable {
+    /// A dot call on a collection calls the service on each element, as Eclipse AQL does.
+    ///
+    /// An element that is itself a collection has the call applied to each of its elements
+    /// in turn. The results are collected in a collection of the kind of the receiver: a
+    /// result that is a collection contributes its elements, and a null result, or an element
+    /// that has no service of the name for arguments of their types, contributes nothing. An ordered set or a set leaves
+    /// out repeated results. For example, `Sequence{'a', 'bc'}.size()` yields
+    /// `Sequence{1, 2}`, `OrderedSet{'a', 'b'}.size()` yields `OrderedSet{1}`, and
+    /// `Sequence{1, 2}.size()` yields `Sequence{}`, as integers have no `size` service; use
+    /// `Sequence{1, 2}->size()` for the size of the collection.
+    ///
+    /// The same rules apply to navigating a feature over a collection: an element without
+    /// the feature contributes nothing. In strict mode (see ``AQLOptions/strict``), a dot
+    /// call or a navigation over a collection none of whose elements has the service or the
+    /// feature raises an error. This is the default.
+    case eachElement = "each-element"
+
+    /// A dot call on a collection calls the service on the collection.
+    ///
+    /// `Sequence{'a', 'bc'}.size()` yields `2`, as `Sequence{'a', 'bc'}->size()` does, and a
+    /// navigation over a collection fails if an element is an object without the feature.
+    /// This is the behaviour of version 0.6.
+    case collection
+}
+
 /// Options that choose between the current behaviour of AQL evaluation and that of
 /// version 0.6.
 ///
@@ -206,7 +241,8 @@ public enum AQLTextForm: String, Sendable, CaseIterable, Hashable {
 /// ```
 ///
 /// ``strict`` is the exception: both presets leave it off, and turning it on makes the
-/// collection services reject the arguments that Eclipse AQL rejects.
+/// collection services reject the arguments that Eclipse AQL rejects, and dot calls on
+/// collections reject services and features that no element has.
 public struct AQLOptions: Sendable, Equatable, Hashable {
     /// How `including`, `append` and `prepend` add an argument that is a collection.
     public var collectionArguments: AQLCollectionArguments
@@ -232,7 +268,10 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     /// The text of a value, as `toString()` gives it and `+` joins it to a string.
     public var textForm: AQLTextForm
 
-    /// Whether collection services reject the arguments that Eclipse AQL rejects.
+    /// What a call written with a dot does when its receiver is a collection.
+    public var dotCalls: AQLDotCalls
+
+    /// Whether collection services and dot calls reject what Eclipse AQL rejects.
     ///
     /// Outside strict mode, which is the default of both ``standard`` and ``legacy``, the
     /// collection services accept some arguments for which Eclipse AQL has no service. In
@@ -246,6 +285,12 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     ///   `includesAll` and `excludesAll` with an argument that is not a collection,
     ///   null included. Outside strict mode, such an argument counts as a collection holding
     ///   it, and null as an empty collection.
+    ///
+    /// While ``dotCalls`` is ``AQLDotCalls/eachElement``, strict mode also rejects a dot call
+    /// or a navigation over a collection when none of the elements it reaches has the service
+    /// or the feature, such as `Sequence{1, 2}.size()`, by raising
+    /// ``AQLExecutionError/invalidOperation(_:)``. Outside strict mode, the result leaves such
+    /// elements out.
     ///
     /// While ``collectionKinds`` is ``AQLCollectionKinds/sequences``, every collection is a
     /// sequence, so that no union is rejected for the kinds of its collections.
@@ -267,8 +312,10 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     ///   - nullAddition: What `+` makes of a null operand (default:
     ///     ``AQLNullAddition/emptyText``).
     ///   - textForm: The text of values (default: ``AQLTextForm/joined``).
-    ///   - strict: Whether collection services reject the arguments that Eclipse AQL rejects
-    ///     (default: `false`).
+    ///   - dotCalls: What a dot call on a collection does (default:
+    ///     ``AQLDotCalls/eachElement``).
+    ///   - strict: Whether collection services and dot calls reject what Eclipse AQL
+    ///     rejects (default: `false`).
     public init(
         collectionArguments: AQLCollectionArguments = .whole,
         collectionKinds: AQLCollectionKinds = .distinguished,
@@ -277,6 +324,7 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
         sequenceUnion: AQLSequenceUnion = .concatenation,
         nullAddition: AQLNullAddition = .emptyText,
         textForm: AQLTextForm = .joined,
+        dotCalls: AQLDotCalls = .eachElement,
         strict: Bool = false
     ) {
         self.collectionArguments = collectionArguments
@@ -286,6 +334,7 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
         self.sequenceUnion = sequenceUnion
         self.nullAddition = nullAddition
         self.textForm = textForm
+        self.dotCalls = dotCalls
         self.strict = strict
     }
 
@@ -294,7 +343,8 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     /// Collection arguments are added whole, collections keep their kind, an arrow call sees
     /// a single value as a set, containers are found through the registered resources, the
     /// union of a sequence or a bag keeps repeated elements, `+` counts null as empty text,
-    /// and the text of a collection joins the text of its elements. Strict mode is off.
+    /// the text of a collection joins the text of its elements, and a dot call on a
+    /// collection applies to each element. Strict mode is off.
     public static let standard = AQLOptions()
 
     /// The options that reproduce the behaviour of version 0.6.
@@ -302,8 +352,9 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
     /// Only the first element of a collection argument is added, every collection behaves
     /// as a sequence, an arrow call sees a single value as a sequence, containers are found
     /// among the objects that the registered resources list, a union leaves out repeated
-    /// elements, `+` with a null operand yields null, and the text of a collection lists the
-    /// text of its elements in brackets. Strict mode is off, as for ``standard``.
+    /// elements, `+` with a null operand yields null, the text of a collection lists the
+    /// text of its elements in brackets, and a dot call on a collection applies to the
+    /// collection. Strict mode is off, as for ``standard``.
     public static let legacy = AQLOptions(
         collectionArguments: .firstElement,
         collectionKinds: .sequences,
@@ -311,7 +362,8 @@ public struct AQLOptions: Sendable, Equatable, Hashable {
         containerLookup: .registeredObjects,
         sequenceUnion: .distinct,
         nullAddition: .null,
-        textForm: .bracketed
+        textForm: .bracketed,
+        dotCalls: .collection
     )
 
     /// Creates the options that a choice of semantics selects.

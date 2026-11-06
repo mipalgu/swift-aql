@@ -95,10 +95,12 @@ public struct AQLNavigationExpression: AQLExpression {
         do {
             return try await context.navigate(from: sourceValue, property: property)
         } catch {
-            // Fall back to a zero-argument service registered by the client.
-            if let service = context.services.find(
-                name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
-                customOnly: true)
+            // Fall back to a zero-argument service registered by the client, unless the
+            // navigation applies to each element of a collection.
+            if context.options.dotCalls == .collection || AQLValues.elements(of: sourceValue) == nil,
+                let service = context.services.find(
+                    name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
+                    customOnly: true)
             {
                 return try await service.invoke(
                     AQLServiceCall(

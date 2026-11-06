@@ -20,7 +20,7 @@ struct AQLCollectionOperatorTests {
     /// `+` and `add` between two collections.
     nonisolated static let additions: [KindExample] = [
         KindExample("Sequence{'a', 'b', 'c'} + Sequence{'d', 'e'}", "Sequence{'a', 'b', 'c', 'd', 'e'}"),
-        KindExample("Sequence{'a', 'b', 'c'}.add(Sequence{'d', 'e'})", "Sequence{'a', 'b', 'c', 'd', 'e'}"),
+        KindExample("Sequence{'a', 'b', 'c'}.add(Sequence{'d', 'e'})", "Sequence{'ade', 'bde', 'cde'}"),
         KindExample("Sequence{'a', 'b', 'c'}->add(Sequence{'d', 'e'})", "Sequence{'a', 'b', 'c', 'd', 'e'}"),
         KindExample("Sequence{'a', 'b', 'c'} + OrderedSet{'c', 'e'}", "Sequence{'a', 'b', 'c', 'c', 'e'}"),
         KindExample("Sequence{'a', 'b'} + Sequence{'b', 'a'}", "Sequence{'a', 'b', 'b', 'a'}"),
@@ -51,7 +51,7 @@ struct AQLCollectionOperatorTests {
         KindExample("'times ' + 42", "'times 42'"),
         KindExample("42 + ' times'", "'42 times'"),
         KindExample("'is ' + true", "'is true'"),
-        KindExample("Sequence{'a'}.add('b')", "'ab'"),
+        KindExample("Sequence{'a'}.add('b')", "Sequence{'ab'}"),
         KindExample("'a'.add(Sequence{'b', 'c'})", "'abc'"),
         KindExample("'a'.add('b')", "'ab'"),
         KindExample("'a'.add(1)", "'a1'"),
@@ -64,7 +64,7 @@ struct AQLCollectionOperatorTests {
 
     @Test(
         "Adding a collection and a value that is neither a collection nor a string fails",
-        arguments: ["Sequence{1} + 2", "1 + Sequence{2}", "Sequence{1}.add(2)", "OrderedSet{1}->add(2)", "true + Sequence{}"])
+        arguments: ["Sequence{1} + 2", "1 + Sequence{2}", "OrderedSet{1}->add(2)", "true + Sequence{}"])
     func invalidAddition(_ source: String) async throws {
         await #expect(throws: AQLExecutionError.self) { _ = try await AQLCollectionKindTests.value(of: source) }
     }
@@ -80,7 +80,7 @@ struct AQLCollectionOperatorTests {
         KindExample("null + 1", "'1'"),
         KindExample("2.5 + null", "'2.5'"),
         KindExample("null + false", "'false'"),
-        KindExample("Sequence{'a'}.add(null)", "'a'"),
+        KindExample("Sequence{'a'}.add(null)", "Sequence{'a'}"),
         KindExample("Sequence{'a'}->add(null)", "'a'"),
         KindExample("'a'.add(null)", "'a'"),
         KindExample("null->add('x')", "'x'"),
@@ -89,6 +89,31 @@ struct AQLCollectionOperatorTests {
     @Test("Adding null treats it as empty text", arguments: nullAdditions)
     func nullAddition(_ example: KindExample) async throws {
         try await AQLCollectionKindTests.check(example)
+    }
+
+    // MARK: Dot calls on the collection
+
+    /// Dot calls that call the service of the collection while ``AQLOptions/dotCalls`` is
+    /// ``AQLDotCalls/collection``, with their values.
+    nonisolated static let collectionDotCalls: [KindExample] = [
+        KindExample("Sequence{'a', 'b', 'c'}.add(Sequence{'d', 'e'})", "Sequence{'a', 'b', 'c', 'd', 'e'}"),
+        KindExample("Sequence{'a'}.add('b')", "'ab'"),
+        KindExample("Sequence{'a'}.add(null)", "'a'"),
+        KindExample("Sequence{'a', 'b'}.toString()", "'ab'"),
+        KindExample("Sequence{'a', 'b'}.union(Sequence{'b'})", "Sequence{'a', 'b', 'b'}"),
+    ]
+
+    @Test("A dot call on a collection can call the service of the collection", arguments: collectionDotCalls)
+    func collectionDotCall(_ example: KindExample) async throws {
+        try await AQLCollectionKindTests.check(example, with: AQLCollectionKindTests.dotCallsOnCollections)
+    }
+
+    @Test("Adding a value that is not a collection to a collection with a dot call on the collection fails")
+    func invalidCollectionDotCall() async throws {
+        let context = makeContext(options: AQLCollectionKindTests.dotCallsOnCollections)
+        await #expect(throws: AQLExecutionError.self) {
+            _ = try await AQLCollectionKindTests.value(of: "Sequence{1}.add(2)", in: context)
+        }
     }
 
     @Test("Subtracting null still yields null", arguments: ["Sequence{'a'} - null", "null - Sequence{'a'}", "null - 1"])
@@ -101,7 +126,7 @@ struct AQLCollectionOperatorTests {
     /// `toString` of collections and null, and the text that `+` joins.
     nonisolated static let texts: [KindExample] = [
         KindExample("Sequence{'a', 'b'}->toString()", "'ab'"),
-        KindExample("Sequence{'a', 'b'}.toString()", "'ab'"),
+        KindExample("Sequence{'a', 'b'}.toString()", "Sequence{'a', 'b'}"),
         KindExample("toString(Sequence{'a', 'b'})", "'ab'"),
         KindExample("OrderedSet{'hello', 'world'}->toString()", "'helloworld'"),
         KindExample("Sequence{'a', Sequence{'b', OrderedSet{'c'}}, 1, true}->toString()", "'abc1true'"),
@@ -165,7 +190,7 @@ struct AQLCollectionOperatorTests {
         KindExample(
             "Sequence{'a', 'b', 'c', 'c', 'c'}->union(Sequence{'c', 'b', 'a'})",
             "Sequence{'a', 'b', 'c', 'c', 'c', 'c', 'b', 'a'}"),
-        KindExample("Sequence{'a', 'b'}.union(Sequence{'b'})", "Sequence{'a', 'b', 'b'}"),
+        KindExample("Sequence{'a', 'b'}.union(Sequence{'b'})", "Sequence{}"),
         KindExample("Sequence{}->union(Sequence{})", "Sequence{}"),
         KindExample("Bag{'a', 'b'}->union(Bag{'b'})", "Bag{'a', 'b', 'b'}"),
         KindExample("OrderedSet{'a', 'b', 'c'}->union(OrderedSet{'d', 'c'})", "OrderedSet{'a', 'b', 'c', 'd'}"),

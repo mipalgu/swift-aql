@@ -59,6 +59,36 @@ self.attributes->size()                -- Collection operation
 self.name.substring(0, 5)              -- Operation with arguments
 ```
 
+### Dot and Arrow Calls on Collections
+
+The arrow calls a collection service on the collection itself. The dot applies a call to
+each element of a collection, just as it navigates a feature of each element, even when a
+collection service of the same name exists. With `names` holding `Sequence{'Ann', 'Bob'}`:
+
+```aql
+names->size()                -- 2, the number of names
+names.size()                 -- Sequence{3, 3}, the length of each name
+names.toUpper()              -- Sequence{'ANN', 'BOB'}
+OrderedSet{'a', 'b'}.size()  -- OrderedSet{1}, as an ordered set keeps 1 only once
+Sequence{1, 2}.size()        -- Sequence{}, as an integer has no size
+'Ann'->size()                -- 1, as a single value is a collection of one
+null->size()                 -- 0, as null is an empty collection
+```
+
+A dot call walks nested collections, flattens the results by one level, leaves out null
+results and elements without a service of that name, and keeps the kind of its receiver, so
+that a dot call on an ordered set or a set yields an ordered set or a set. Write collection
+services such as `size`, `first`, `sum` and `select` with the arrow: the arrow gives the same
+result whatever ``AQLOptions/dotCalls`` says (see
+<doc:UnderstandingAQL#Options-and-Compatibility-with-0.6>).
+
+When a dot call reaches an element without the service while the collection has a service of
+that name, as in `Sequence{1, 2}.size()`, the context records a warning with the code
+``AQLDiagnosticCode/dotCallOnElements`` and the range of the call, suggesting `->size()`.
+``AQLExecutionContext/diagnostics`` lists the warnings oldest first, each one once, and keeps
+a warning even when strict mode then raises an error;
+``AQLExecutionContext/clearDiagnostics()`` empties the list.
+
 ## Collection Operations
 
 Collections are central to AQL. Operations use the `->` arrow syntax.
@@ -93,7 +123,7 @@ Sequence{'a', 'b', 'c'}->append('b')        -- Sequence{'a', 'b', 'c', 'b'}
 | `notEmpty()` | True if has elements | `col->notEmpty()` |
 | `first()` | First element | `col->first()` |
 | `last()` | Last element | `col->last()` |
-| `at(index)` | Element at index | `col->at(0)` |
+| `at(index)` | Element at a one-based index | `col->at(1)` |
 
 ### Filtering
 
@@ -157,7 +187,7 @@ Sequence{'a', 'b', 'a'}->intersection(Sequence{'a'}) -- Sequence{'a', 'a'}
 |-----------|-------------|---------|
 | `toUpper()` | Uppercase | `name.toUpper()` |
 | `toLower()` | Lowercase | `name.toLower()` |
-| `concat(str)` | Concatenate | `name.concat('.swift')` |
+| `concat(str)` | Concatenate (null adds nothing) | `name.concat('.swift')` |
 | `+`, `add(value)` | Append the text of any value (null has no text) | `'times ' + 42` |
 | `toString()` | The text of any value; a collection joins the text of its elements | `col->toString()` |
 | `substring(start, end)` | Extract portion | `name.substring(0, 5)` |
@@ -192,7 +222,7 @@ Sequence{'a', 'b', 'a'}->intersection(Sequence{'a'}) -- Sequence{'a', 'a'}
 
 | Operation | Description | Example |
 |-----------|-------------|---------|
-| `+` | Addition (with a string operand, concatenation of text) | `a + b` |
+| `+`, `add(n)` | Addition (with a string operand, concatenation of text) | `a + b`, `1.add(2)` |
 | `-` | Subtraction | `a - b` |
 | `*` | Multiplication | `a * b` |
 | `/` | Division | `a / b` |
@@ -330,7 +360,9 @@ context.register(GreetingServices())
 ```
 
 The calls `receiver.name(args)`, `receiver->name(args)` and `name(args)` search the
-registered services, most recent first, and then the standard library. Services may be
+registered services, most recent first, and then the standard library. A dot call on a
+collection searches them for each element (see
+<doc:UnderstandingAQL#Dot-and-Arrow-Calls-on-Collections>). Services may be
 asynchronous and use `call.context` to navigate the model. Iterator arguments (`x | body`)
 arrive as ``AQLLambda`` values, and type arguments (`ecore::EClass`) as
 ``AQLTypeDescriptor`` values. A service that changes a model declares so with
@@ -394,6 +426,7 @@ can be set on its own:
 | ``AQLOptions/sequenceUnion`` | ``AQLSequenceUnion/concatenation`` | ``AQLSequenceUnion/distinct`` |
 | ``AQLOptions/nullAddition`` | ``AQLNullAddition/emptyText`` | ``AQLNullAddition/null`` |
 | ``AQLOptions/textForm`` | ``AQLTextForm/joined`` | ``AQLTextForm/bracketed`` |
+| ``AQLOptions/dotCalls`` | ``AQLDotCalls/eachElement`` | ``AQLDotCalls/collection`` |
 
 The options make these differences:
 
@@ -416,6 +449,9 @@ Sequence{'a', 'b'}->union(Sequence{'b', 'c'})
 Sequence{'a', Sequence{'b'}}->toString()
     -- joined:         'ab'
     -- bracketed:      '[a, [b]]'
+Sequence{'ab', 'c'}.size()
+    -- each-element:   Sequence{2, 1}
+    -- collection:     2
 ```
 
 The raw value of each choice is its command-line spelling (for example `first-element`
@@ -431,6 +467,13 @@ The behaviours that changed since version 0.6, besides those shown above, are:
 - **Null in `+`**: `null + 'x'` yields `'x'` and `null + null` yields `''`.
 - **Text of collections**: `null.toString()` yields `''` rather than `'null'`, and `+`
   joins collections to strings in the same form.
+- **Dot calls on collections**: with ``AQLDotCalls/eachElement``, as in Eclipse AQL, a dot
+  call on a collection applies to each element, so `names.size()` gives the length of each
+  name. With ``AQLDotCalls/collection``, as in version 0.6, it calls the collection service,
+  so `names.size()` gives the number of names. Navigating a feature, as in
+  `self.attributes.name`, collects it under both, but an element without the feature is
+  left out with ``AQLDotCalls/eachElement`` and an error with ``AQLDotCalls/collection``.
+  An arrow call, as in `names->size()`, behaves the same under both.
 - **Services**: `AQLService` gained `modifiesModels` and `invoke(_:)`, and
   `AQLServiceCall` gained `receiverKind`. The initialisers of version 0.6 remain and
   create services that do not modify models.
@@ -444,6 +487,14 @@ ordered set or a set, and `union`, `concat`, `sub`, `intersection`, `includesAll
 ```aql
 Sequence{'a'}->union(OrderedSet{'b'})   -- Sequence{'a', 'b'}, or an error in strict mode
 Sequence{'a'}->concat('b')              -- Sequence{'a', 'b'}, or an error in strict mode
+```
+
+With ``AQLDotCalls/eachElement``, strict mode also makes a dot call or a navigation over a
+collection an error when none of its elements has the service or the feature; otherwise those
+elements are left out:
+
+```aql
+Sequence{1, 2}.size()                   -- Sequence{}, or an error in strict mode
 ```
 
 With ``AQLContainerLookup/resources``, `eContainer()`, `ancestors()` and the sibling

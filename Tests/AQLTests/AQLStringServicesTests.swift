@@ -104,6 +104,13 @@ struct AQLStringServicesTests {
         }
     }
 
+    @Test("Concatenating null adds no text", arguments: [AQLOptions.standard, .legacy])
+    func concatenatingNull(_ options: AQLOptions) async throws {
+        let context = makeContext(options: options)
+        #expect(try await AQLCollectionKindTests.value(of: "'a'.concat(null)", in: context) as? String == "a")
+        #expect(try await AQLCollectionKindTests.value(of: "concat('a', null)", in: context) as? String == "a")
+    }
+
     @Test("Standalone call treats first argument as receiver")
     func standaloneForm() async throws {
         let expr = AQLCallExpression(methodName: "toUpper", arguments: [lit("abc")])

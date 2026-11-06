@@ -8,7 +8,7 @@
 
 import EMFBase
 
-/// The codes of the diagnostics that the AQL parser reports.
+/// The codes of the diagnostics that the AQL parser and the evaluation of expressions report.
 public enum AQLDiagnosticCode {
     /// A token appeared where the grammar does not allow it.
     public static let unexpectedToken = "aql.unexpectedToken"
@@ -30,6 +30,17 @@ public enum AQLDiagnosticCode {
 
     /// Tokens remain after a complete expression.
     public static let trailingTokens = "aql.trailingTokens"
+
+    /// A dot call on a collection reached an element without the service, which the
+    /// collection itself has.
+    ///
+    /// While ``AQLOptions/dotCalls`` is ``AQLDotCalls/eachElement``, a dot call such as
+    /// `Sequence{1, 2}.size()` is made on each element, as Eclipse AQL does, rather than on
+    /// the collection, as version 0.6 does. When an element has no service of the name but the
+    /// collection has one, the call most likely meant the collection's service, written
+    /// `Sequence{1, 2}->size()`. Evaluation reports this code as a warning in
+    /// ``AQLExecutionContext/diagnostics``.
+    public static let dotCallOnElements = "aql.dotCallOnElements"
 }
 
 /// The error thrown when AQL text does not follow the grammar.

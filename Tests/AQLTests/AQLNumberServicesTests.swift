@@ -42,6 +42,35 @@ struct AQLNumberServicesTests {
         try await check(test)
     }
 
+    /// Additions with the `add` service of numbers, which yields what `+` yields.
+    nonisolated static let additions: [KindExample] = [
+        KindExample("1.add(2)", "3"),
+        KindExample("1.add(2)", "1 + 2"),
+        KindExample("1.5.add(2)", "3.5"),
+        KindExample("2.add(0.5)", "2.5"),
+        KindExample("1.add('x')", "'1x'"),
+        KindExample("Sequence{1}.add(2)", "Sequence{3}"),
+        KindExample("Sequence{1, 2.5}.add(1)", "Sequence{2, 3.5}"),
+        KindExample("OrderedSet{1, 2}.add(-1)", "OrderedSet{0, 1}"),
+    ]
+
+    @Test("Numbers add as + does", arguments: additions)
+    func addition(_ example: KindExample) async throws {
+        try await AQLCollectionKindTests.check(example)
+    }
+
+    @Test("Numbers add under the legacy options")
+    func legacyAddition() async throws {
+        let context = makeContext(options: .legacy)
+        #expect(try await AQLCollectionKindTests.value(of: "1.add(2)", in: context) as? Int == 3)
+        #expect(try await AQLCollectionKindTests.value(of: "1.5.add(2)", in: context) as? Double == 3.5)
+    }
+
+    @Test("Adding a collection to a number fails as + does", arguments: ["1.add(Sequence{2})", "1 + Sequence{2}"])
+    func invalidAddition(_ source: String) async throws {
+        await #expect(throws: AQLExecutionError.self) { _ = try await AQLCollectionKindTests.value(of: source) }
+    }
+
     @Test("Division by zero is reported")
     func divisionByZero() async throws {
         await #expect(throws: AQLExecutionError.self) {

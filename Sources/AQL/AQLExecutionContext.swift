@@ -52,6 +52,21 @@ public final class AQLExecutionContext: Sendable {
     /// Debug mode flag.
     public var debug: Bool = false
 
+    /// The warnings reported while evaluating expressions in this context, oldest first.
+    ///
+    /// Evaluation reports a warning with the code ``AQLDiagnosticCode/dotCallOnElements`` and
+    /// the range of the call when a dot call on a collection reaches an element that has no
+    /// service of the name while the collection has one (see ``AQLDotCalls/eachElement``).
+    /// The diagnostics accumulate across evaluations: a client that wants the warnings of a
+    /// single evaluation calls ``clearDiagnostics()`` before it. A diagnostic equal to one
+    /// already held (with the same severity, code, message and range) is not added again, so
+    /// evaluating the same expressions repeatedly does not make the list grow. A warning
+    /// stays even if the evaluation that reported it then fails.
+    public private(set) var diagnostics: [SourceDiagnostic] = []
+
+    /// The diagnostics held in ``diagnostics``, for finding repeated reports quickly.
+    private var reportedDiagnostics: Set<SourceDiagnostic> = []
+
     /// The services callable from expressions evaluated in this context.
     ///
     /// The registry starts with the standard library; use ``register(_:)`` to add services.
@@ -197,6 +212,25 @@ public final class AQLExecutionContext: Sendable {
         var registry = AQLServiceRegistry()
         for provider in providers { registry.register(provider) }
         return registry
+    }
+
+    // MARK: - Diagnostics
+
+    /// Removes every diagnostic from ``diagnostics``.
+    ///
+    /// Later evaluations report their diagnostics afresh, including those equal to a
+    /// diagnostic removed.
+    public func clearDiagnostics() {
+        diagnostics = []
+        reportedDiagnostics = []
+    }
+
+    /// Adds a diagnostic to ``diagnostics`` unless an equal one is already held.
+    ///
+    /// - Parameter diagnostic: The diagnostic to report.
+    func report(_ diagnostic: SourceDiagnostic) {
+        guard reportedDiagnostics.insert(diagnostic).inserted else { return }
+        diagnostics.append(diagnostic)
     }
 
     // MARK: - Services
@@ -412,7 +446,11 @@ public final class AQLExecutionContext: Sendable {
     ///
     /// Collections are navigated element by element and the results flattened into a collection
     /// of the same kind (so navigating from an ordered set or a set leaves out repeated results,
-    /// unless ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``). When a derived,
+    /// unless ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``). While
+    /// ``AQLOptions/dotCalls`` is ``AQLDotCalls/eachElement``, an element that is not an
+    /// object, or an object without the feature and without a client-registered zero-argument
+    /// service of that name, contributes nothing; in strict mode, a collection none of whose
+    /// elements has the feature raises an error instead. When a derived,
     /// volatile or transient feature of an object has no value (nil or an empty collection), a
     /// client-registered zero-argument service of the same name is called on the object instead,
     /// so that templates can compute such features without writing parentheses.
@@ -420,6 +458,11 @@ public final class AQLExecutionContext: Sendable {
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
+        if let collection = object, options.dotCalls == .eachElement, AQLValues.elements(of: collection) != nil {
+            return try await applyToEachElement(of: collection, named: property) { element in
+                try await navigateElement(element, property: property)
+            }
+        }
         if let items = AQLValues.elements(of: object) {
             var collected: [any EcoreValue] = []
             for item in items {
@@ -444,6 +487,97 @@ public final class AQLExecutionContext: Sendable {
             AQLServiceCall(name: property, receiver: eObject, arguments: [], context: self))
     }
 
+    /// Navigates a feature from one element of a collection, as a navigation over the
+    /// collection does while ``AQLOptions/dotCalls`` is ``AQLDotCalls/eachElement``.
+    ///
+    /// An object without the feature falls back to a client-registered zero-argument service
+    /// of the same name, as a navigation from a single object does.
+    ///
+    /// - Parameters:
+    ///   - element: The element, which is not a collection.
+    ///   - property: The name of the feature.
+    /// - Returns: The value of the feature, or ``AQLElementResult/missing`` if the element is
+    ///   not an object or has neither the feature nor such a service.
+    /// - Throws: Any error raised by the fallback service.
+    private func navigateElement(_ element: any EcoreValue, property: String) async throws -> AQLElementResult {
+        guard let object = element as? any EObject else { return .missing }
+        do {
+            return .value(try await navigate(from: object, property: property))
+        } catch {
+            guard
+                let service = services.find(
+                    name: property, receiver: object, hasReceiver: true, argumentCount: 0, customOnly: true)
+            else { return .missing }
+            return .value(
+                try await service.invoke(
+                    AQLServiceCall(name: property, receiver: object, arguments: [], context: self)))
+        }
+    }
+
+    // MARK: - Element-wise application
+
+    /// Applies a dot call or a navigation to each element of a collection, as Eclipse AQL does.
+    ///
+    /// An element that is itself a collection has the call applied to each of its elements in
+    /// turn. The results are collected in a collection of the kind of the receiver (see
+    /// ``collectionKind(of:)``): a result that is a collection contributes its elements, and a
+    /// null result or an element for which the call reports ``AQLElementResult/missing``
+    /// contributes nothing.
+    ///
+    /// - Parameters:
+    ///   - receiver: The collection to apply the call to.
+    ///   - name: The name of the service or feature, for the error that strict mode raises.
+    ///   - apply: The call on one element that is not a collection.
+    /// - Returns: The collected results.
+    /// - Throws: ``AQLExecutionError/invalidOperation(_:)`` in strict mode if the call reports
+    ///   ``AQLElementResult/missing`` for every element it reaches and there is at least one
+    ///   such element, and any error that `apply` throws.
+    func applyToEachElement(
+        of receiver: any EcoreValue, named name: String,
+        _ apply: (any EcoreValue) async throws -> AQLElementResult
+    ) async throws -> EcoreValueArray {
+        var reach = AQLElementReach()
+        let result = try await applyToEachElement(of: receiver, reach: &reach, apply)
+        if options.strict, reach.missesEveryElement {
+            throw AQLExecutionError.invalidOperation(
+                "No element of the collection has a service or feature named '\(name)'")
+        }
+        return result
+    }
+
+    /// Applies a call to each element of a collection, recording which elements have it.
+    ///
+    /// - Parameters:
+    ///   - receiver: The collection to apply the call to.
+    ///   - reach: The record of the elements that have the call and of those that lack it.
+    ///   - apply: The call on one element that is not a collection.
+    /// - Returns: The collected results.
+    /// - Throws: Any error that `apply` throws.
+    private func applyToEachElement(
+        of receiver: any EcoreValue, reach: inout AQLElementReach,
+        _ apply: (any EcoreValue) async throws -> AQLElementResult
+    ) async throws -> EcoreValueArray {
+        var collected: [any EcoreValue] = []
+        for element in AQLValues.elements(of: receiver) ?? [] {
+            let value: (any EcoreValue)?
+            if AQLValues.elements(of: element) != nil {
+                value = try await applyToEachElement(of: element, reach: &reach, apply)
+            } else {
+                switch try await apply(element) {
+                case .value(let result):
+                    reach.found = true
+                    value = result
+                case .missing:
+                    reach.missed = true
+                    value = nil
+                }
+            }
+            guard let value else { continue }
+            collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
+        }
+        return collection(collected, kind: collectionKind(of: receiver))
+    }
+
     private static func hasNoValue(_ value: (any EcoreValue)?) -> Bool {
         guard let value else { return true }
         return AQLValues.elements(of: value)?.isEmpty ?? false
@@ -459,6 +593,28 @@ public final class AQLExecutionContext: Sendable {
         }
         return false
     }
+}
+
+/// The outcome of applying a dot call or a navigation to one element of a collection.
+enum AQLElementResult {
+    /// The element has the service or the feature, which gives this value (`nil` for null).
+    case value((any EcoreValue)?)
+
+    /// The element has no service or feature of the name.
+    case missing
+}
+
+/// Which of the elements reached by an element-wise call have the call.
+struct AQLElementReach {
+    /// Whether some element has the service or the feature.
+    var found = false
+
+    /// Whether some element lacks the service or the feature.
+    var missed = false
+
+    /// Whether every element reached lacks the service or the feature, and at least one was
+    /// reached.
+    var missesEveryElement: Bool { missed && !found }
 }
 
 /// Errors that can occur during AQL execution.

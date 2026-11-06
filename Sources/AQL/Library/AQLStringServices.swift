@@ -23,7 +23,8 @@ import Foundation
 /// `isAlpha`, `isAlphanum`, `trim`, `toInteger`, `toReal`, `toBoolean`, and
 /// `removeLineSeparators`.
 ///
-/// `concat` requires a string argument. `add`, which the `+` operator also computes, accepts any
+/// `concat` requires a string argument or null, which counts as no text, so that
+/// `'a'.concat(null)` is `'a'`. `add`, which the `+` operator also computes, accepts any
 /// argument and appends its text in the ``AQLOptions/textForm`` of the context: a number or a
 /// boolean as written, a collection by default as the text of its elements without separators
 /// (`'x'.add(Sequence{'a', 1})` is `'xa1'`), and null by default as no text.
@@ -135,7 +136,10 @@ public struct AQLStringServices: AQLServiceProvider {
         add(["toLowerCase", "toLower", "lower"]) { try $0.receiverString().lowercased() }
         add(["toUpperFirst"]) { Self.capitalise(try $0.receiverString(), upper: true) }
         add(["toLowerFirst"]) { Self.capitalise(try $0.receiverString(), upper: false) }
-        add(["concat", "+"], arity: 1...1) { try $0.receiverString() + $0.string(0) }
+        add(["concat"], arity: 1...1) { call in
+            try call.receiverString() + (call.argument(0) == nil ? "" : try call.string(0))
+        }
+        add(["+"], arity: 1...1) { try $0.receiverString() + $0.string(0) }
         add(["add"], arity: 1...1) { call in
             try AQLBinaryExpression.addition(try call.receiverString(), call.argument(0), in: call.context)
         }

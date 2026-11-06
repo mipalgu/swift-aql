@@ -43,7 +43,7 @@ struct AQLStrictModeTests {
         LenientExample("Sequence{'a'}->union('b')", lenient: "Sequence{'a', 'b'}"),
         LenientExample("Sequence{'a'}->union(null)", lenient: "Sequence{'a'}"),
         LenientExample("Sequence{'a'}->concat('b')", lenient: "Sequence{'a', 'b'}"),
-        LenientExample("Sequence{'a'}.concat(null)", lenient: "Sequence{'a'}"),
+        LenientExample("Sequence{'a'}->concat(null)", lenient: "Sequence{'a'}"),
         LenientExample("Sequence{'a'}->addAll('b')", lenient: "Sequence{'a', 'b'}"),
         LenientExample("Sequence{'a', 'b'}->sub('a')", lenient: "Sequence{'b'}"),
         LenientExample("Sequence{'a', 'b'}->difference('a')", lenient: "Sequence{'b'}"),
@@ -79,7 +79,8 @@ struct AQLStrictModeTests {
         KindExample("Sequence{'a'} + OrderedSet{'b'}", "Sequence{'a', 'b'}"),
         KindExample("Sequence{'a'} - OrderedSet{'a'}", "Sequence{}"),
         KindExample("Sequence{'a'} + 'b'", "'ab'"),
-        KindExample("Sequence{'a'}.add(null)", "'a'"),
+        KindExample("Sequence{'a'}.add(null)", "Sequence{'a'}"),
+        KindExample("Sequence{'a'}->add(null)", "'a'"),
         KindExample("Sequence{'a'}->including('b')", "Sequence{'a', 'b'}"),
         KindExample("Sequence{'a'}->excluding('a')", "Sequence{}"),
     ]

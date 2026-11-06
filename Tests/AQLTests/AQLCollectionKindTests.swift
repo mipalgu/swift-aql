@@ -53,9 +53,19 @@ struct AQLCollectionKindTests {
         (value as? EcoreValueArray)?.kind
     }
 
+    /// The standard options with dot calls on a collection calling the collection's service.
+    ///
+    /// The Acceleo documentation writes some collection service examples with a dot, which
+    /// calls the service of the collection only under this choice of ``AQLOptions/dotCalls``.
+    static let dotCallsOnCollections = AQLOptions(dotCalls: .collection)
+
     /// Checks that an example yields the elements and the kind of its expected value.
-    static func check(_ example: KindExample) async throws {
-        let result = try await value(of: example.source)
+    ///
+    /// - Parameters:
+    ///   - example: The example to check.
+    ///   - options: The options to evaluate the source of the example with.
+    static func check(_ example: KindExample, with options: AQLOptions = .standard) async throws {
+        let result = try await value(of: example.source, in: makeContext(options: options))
         let expected = try await value(of: example.expected)
         #expect(AQLValues.areEqual(result, expected), "got \(AQLValues.description(of: result))")
         #expect(kind(result) == kind(expected))
@@ -124,12 +134,12 @@ struct AQLCollectionKindTests {
 
     @Test("Acceleo examples for ordered sets", arguments: orderedSetExamples)
     func orderedSetExample(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     @Test("Acceleo examples for sets", arguments: orderedSetExamples.map { $0.replacing("OrderedSet{", with: "Set{") })
     func setExample(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     @Test("Conversions yield the requested kind", arguments: conversionExamples)
@@ -139,12 +149,12 @@ struct AQLCollectionKindTests {
 
     @Test("Sequences keep their kind with set arguments", arguments: mixedExamples)
     func mixedExample(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     @Test("Bags keep their kind with set arguments", arguments: mixedExamples.map { $0.replacing("Sequence{", with: "Bag{") })
     func bagExample(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     // MARK: Elements already present
@@ -186,12 +196,12 @@ struct AQLCollectionKindTests {
 
     @Test("Ordered sets move or keep an element already present", arguments: uniqueAdditions)
     func orderedSetAddition(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     @Test("Sets move or keep an element already present", arguments: uniqueAdditions.map { $0.replacing("OrderedSet{", with: "Set{") })
     func setAddition(_ example: KindExample) async throws {
-        try await Self.check(example)
+        try await Self.check(example, with: Self.dotCallsOnCollections)
     }
 
     @Test("Sequences add an element already present again", arguments: repeatedAdditions)
@@ -254,14 +264,23 @@ struct AQLCollectionKindTests {
     @Test("The textual form does not depend on the kind", arguments: EcoreCollectionKind.allCases)
     func textualForm(_ kind: EcoreCollectionKind) async throws {
         let result = try await Self.value(
-            of: "\(kind.rawValue){'a', 'b'}.toString()", in: makeContext(options: AQLOptions(textForm: .bracketed)))
+            of: "\(kind.rawValue){'a', 'b'}.toString()",
+            in: makeContext(options: AQLOptions(textForm: .bracketed, dotCalls: .collection)))
         #expect(result as? String == "[a, b]")
     }
 
     @Test("The joined text does not depend on the kind", arguments: EcoreCollectionKind.allCases)
     func joinedText(_ kind: EcoreCollectionKind) async throws {
-        let result = try await Self.value(of: "\(kind.rawValue){'a', 'b'}.toString()")
+        let result = try await Self.value(
+            of: "\(kind.rawValue){'a', 'b'}.toString()", in: makeContext(options: Self.dotCallsOnCollections))
         #expect(result as? String == "ab")
+    }
+
+    @Test("The text of each element does not depend on the kind", arguments: EcoreCollectionKind.allCases)
+    func textOfEachElement(_ kind: EcoreCollectionKind) async throws {
+        let result = try await Self.value(of: "\(kind.rawValue){'a', 'b'}.toString()")
+        #expect(AQLValues.areEqual(result, seq("a", "b")))
+        #expect(Self.kind(result) == kind)
     }
 
     // MARK: Implicit collections

@@ -94,7 +94,17 @@ let required = try await evaluate("self.attributes->select(a | a.isRequired)", i
 
 // Get attribute names
 let names = try await evaluate("self.attributes->collect(a | a.name)", in: context)
+
+// Count the attributes
+let count = try await evaluate("self.attributes->size()", in: context)
+
+// Get the length of each attribute name
+let lengths = try await evaluate("self.attributes.name.size()", in: context)
 ```
+
+The arrow calls a collection service, such as `size`, on the collection itself, while the dot
+applies a call to each element of a collection, as it does when navigating `.name` (see
+<doc:UnderstandingAQL#Dot-and-Arrow-Calls-on-Collections>).
 
 ### String Operations
 
