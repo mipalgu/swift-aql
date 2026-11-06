@@ -208,7 +208,7 @@ Sequence{'a', 'b', 'a'}->intersection(Sequence{'a'}) -- Sequence{'a', 'a'}
 | `oclIsKindOf(Type)` | Instance of type or subtype | `e.oclIsKindOf(Entity)` |
 | `oclIsTypeOf(Type)` | Exact type match | `e.oclIsTypeOf(Entity)` |
 | `oclAsType(Type)` | Cast to type | `e.oclAsType(Entity)` |
-| `oclType()` | Get the type | `e.oclType()` |
+| `eClass()` | Get the metaclass | `e.eClass()` |
 | `oclIsUndefined()` | Is null/undefined | `e.oclIsUndefined()` |
 
 ## Conditional Expressions
@@ -310,6 +310,69 @@ let context = AQLExecutionContext(options: .standard, unsetFeatureReads: .undefi
 await existingContext.executionEngine.setUnsetFeatureReads(.undefined)
 ```
 
+## Services
+
+Operations on strings, collections, numbers, booleans and model objects are provided as
+services. The standard library of Acceleo and AQL string, collection and `EObject` services
+is available in every ``AQLExecutionContext``, and clients add their own by registering an
+``AQLServiceProvider``:
+
+```swift
+struct GreetingServices: AQLServiceProvider {
+    var services: [AQLService] {
+        [AQLService("greet", receiver: .string, arity: 1) { call in
+            "\(try call.string(0)), \(try call.receiverString())"
+        }]
+    }
+}
+
+context.register(GreetingServices())
+```
+
+The calls `receiver.name(args)`, `receiver->name(args)` and `name(args)` search the
+registered services, most recent first, and then the standard library. Services may be
+asynchronous and use `call.context` to navigate the model. Iterator arguments (`x | body`)
+arrive as ``AQLLambda`` values, and type arguments (`ecore::EClass`) as
+``AQLTypeDescriptor`` values. A service that changes a model declares so with
+`modifiesModels: true`.
+
+As in Eclipse AQL, `+` and `-` also apply to collections, and `+` joins any value to a
+string, with null counting as empty text. They compute the `add` and `sub` services. The
+result of a collection operation has the kind of the left operand, so that an ordered set
+or a set leaves out elements it already holds:
+
+```aql
+Sequence{'a', 'b'} + Sequence{'b', 'c'}      -- Sequence{'a', 'b', 'b', 'c'}
+OrderedSet{'a', 'b'} + Sequence{'b', 'c'}    -- OrderedSet{'a', 'b', 'c'}
+Sequence{'a', 'b', 'a'} - Sequence{'a'}      -- Sequence{'b'}
+'x' + Sequence{'a', 'b'}                     -- 'xab'
+'times ' + 42                                -- 'times 42'
+'x' + null                                   -- 'x'
+Sequence{'a', 'b'} + null                    -- 'ab'
+```
+
+## Containment Queries
+
+`eContainer()`, `ancestors()` and the sibling services ask the resources registered with
+``AQLExecutionContext/addResource(_:)`` for the container of an object (unless
+``AQLOptions/containerLookup`` is ``AQLContainerLookup/registeredObjects``), so they always
+see the current models. Set ``AQLExecutionContext/cachesContainmentIndex`` to look up each
+container only once while the models stay unchanged. Adding a resource drops the cache, and
+so does every call of a service created with `modifiesModels: true`. After changing a model
+in any other way while caching is on, call
+``AQLExecutionContext/invalidateContainmentIndex()``.
+
+## Parsing
+
+``AQLParser/parse(_:)`` reads one AQL expression from text and returns an
+``AQLParseResult`` holding the expression, the diagnostics (`SourceDiagnostic` values with
+ranges and the codes of ``AQLDiagnosticCode``) and the tokens. Host languages that embed
+AQL read their own tokens through an ``AQLTokenCursor`` and shape the nodes through an
+``AQLParserDelegate``. ``AQLSyntax/tokens(in:)`` splits text into highlighting tokens and
+never fails. Every expression node carries an `origin`, its range in the source text, which
+never takes part in equality, and ``AQLTreePrinter`` prints a tree as one deterministic
+line.
+
 ## Options and Compatibility with 0.6
 
 An ``AQLExecutionContext`` evaluates expressions with the ``AQLOptions`` in its
@@ -354,6 +417,23 @@ Sequence{'a', Sequence{'b'}}->toString()
     -- joined:         'ab'
     -- bracketed:      '[a, [b]]'
 ```
+
+The raw value of each choice is its command-line spelling (for example `first-element`
+or `registered-objects`), so that tools can parse it with `init(rawValue:)` and list the
+choices through `allCases`.
+
+The behaviours that changed since version 0.6, besides those shown above, are:
+
+- **Collection kinds**: on an ordered set or a set, `including` does not repeat an element
+  already present, `append`, `prepend` and `insertAt` move it, and `concat`, `collect`,
+  `flatten` and navigation leave out repeated results. `sep` yields a sequence, and
+  `closure` an ordered set or a set. In version 0.6 every collection behaved as a sequence.
+- **Null in `+`**: `null + 'x'` yields `'x'` and `null + null` yields `''`.
+- **Text of collections**: `null.toString()` yields `''` rather than `'null'`, and `+`
+  joins collections to strings in the same form.
+- **Services**: `AQLService` gained `modifiesModels` and `invoke(_:)`, and
+  `AQLServiceCall` gained `receiverKind`. The initialisers of version 0.6 remain and
+  create services that do not modify models.
 
 ``AQLOptions/strict`` is off under both ``AQLOptions/standard`` and ``AQLOptions/legacy``.
 Turning it on makes the collection services raise ``AQLExecutionError/typeError(_:)`` for
@@ -425,7 +505,7 @@ AQL is based on OCL but differs in:
 
 - <doc:GettingStarted> - Practical examples
 - ``AQLExpression`` - Expression API
-- ``AQLCollectionOperations`` - Collection operations reference
+- ``AQLCollectionServices`` - Collection operations reference
 - ``AQLExecutionContext`` - Execution configuration
 
 ## See Also

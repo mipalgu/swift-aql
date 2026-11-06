@@ -31,16 +31,18 @@ whilst providing a type-safe Swift API for integration with the ECore metamodell
 import AQL
 import ECore
 
-// Create execution context
-let engine = ECoreExecutionEngine(models: ["model": myModel])
+// Create an execution context with the default options
+let engine = ECoreExecutionEngine(models: [:])
+await engine.registerResource(myResource, alias: "model")
 let context = AQLExecutionContext(executionEngine: engine, options: .standard)
+context.addResource(myResource)
+context.setVariable("self", value: element)
 
-// Parse a query
-let parser = AQLParser()
-let query = try parser.parse("self.attributes->select(a | a.isRequired)")
-
-// Evaluate against a model element
-let result = try await query.evaluate(in: context, self: myClass)
+// Parse a query and evaluate it
+let parsed = AQLParser().parse("self.attributes->select(a | a.isRequired)")
+if let query = parsed.expression {
+    let result = try await query.evaluate(in: context)
+}
 ```
 
 ## Topics
@@ -53,7 +55,6 @@ let result = try await query.evaluate(in: context, self: myClass)
 ### Execution
 
 - ``AQLExecutionContext``
-- ``AQLEvaluator``
 
 ### Options
 
@@ -70,31 +71,43 @@ let result = try await query.evaluate(in: context, self: myClass)
 
 - ``AQLExpression``
 - ``AQLNavigationExpression``
-- ``AQLOperationCallExpression``
+- ``AQLCallExpression``
 - ``AQLCollectionExpression``
+- ``AQLCollectionLiteralExpression``
 - ``AQLLiteralExpression``
 - ``AQLVariableExpression``
 - ``AQLLambdaExpression``
-- ``AQLIfExpression``
+- ``AQLConditionalExpression``
 - ``AQLLetExpression``
+- ``AQLBinaryExpression``
+- ``AQLUnaryExpression``
 
 ### Parsing
 
 - ``AQLParser``
-- ``AQLLexer``
+- ``AQLParseResult``
+- ``AQLTokenCursor``
+- ``AQLParserDelegate``
+- ``AQLSyntax``
+- ``AQLTreePrinter``
+- ``AQLDiagnosticCode``
 
-### Operations
+### Services
 
-- ``AQLCollectionOperations``
-- ``AQLStringOperations``
-- ``AQLBooleanOperations``
-- ``AQLNumericOperations``
-- ``AQLTypeOperations``
+- ``AQLService``
+- ``AQLServiceCall``
+- ``AQLServiceProvider``
+- ``AQLStandardLibrary``
+- ``AQLCollectionServices``
+- ``AQLStringServices``
+- ``AQLBooleanServices``
+- ``AQLNumberServices``
+- ``AQLObjectServices``
 
 ### Errors
 
-- ``AQLError``
-- ``AQLParseError``
+- ``AQLSyntaxError``
+- ``AQLExecutionError``
 
 ## See Also
 

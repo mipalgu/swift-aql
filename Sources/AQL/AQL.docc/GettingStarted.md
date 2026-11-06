@@ -37,62 +37,76 @@ import AQL
 import ECore
 
 // Load your model
-let xmiParser = XMIParser()
-let resource = try await xmiParser.parse(URL(fileURLWithPath: "model.xmi"))
+let resource = try await XMIParser().parse(URL(fileURLWithPath: "model.xmi"))
 
-// Create an execution engine with your models
-let engine = ECoreExecutionEngine(models: ["model": resource])
+// Create an execution engine that knows the model
+let engine = ECoreExecutionEngine(models: [:])
+await engine.registerResource(resource, alias: "model")
 
 // Create the AQL execution context with the default options
 let context = AQLExecutionContext(executionEngine: engine, options: .standard)
+context.addResource(resource)
 ```
+
+The context is bound to the main actor, so the examples below run there.
 
 Pass ``AQLOptions/legacy`` instead to evaluate expressions as version 0.6 did, or set
 individual options of an ``AQLOptions`` value (see <doc:UnderstandingAQL#Options-and-Compatibility-with-0.6>).
 
 ## Parsing and Evaluating Queries
 
+``AQLParser/parse(_:)`` never throws: it returns an ``AQLParseResult`` holding the
+expression, if the text could be parsed, and the diagnostics. The examples below share
+this helper, which turns the first diagnostic into an ``AQLSyntaxError``:
+
+```swift
+@MainActor
+func evaluate(_ source: String, in context: AQLExecutionContext) async throws -> (any EcoreValue)? {
+    let parsed = AQLParser().parse(source)
+    if let problem = parsed.diagnostics.first { throw AQLSyntaxError(problem) }
+    guard let expression = parsed.expression else { return nil }
+    return try await expression.evaluate(in: context)
+}
+```
+
+The object a query starts from is the `self` variable.
+
 ### Simple Navigation
 
 ```swift
-let parser = AQLParser()
+// Bind a model element as self
+let element = await resource.getRootObjects()[0]
+context.setVariable("self", value: element)
 
-// Parse a simple navigation query
-let nameQuery = try parser.parse("self.name")
-
-// Evaluate against a model element
-let element = resource.rootObjects.first!
-let name = try await nameQuery.evaluate(in: context, self: element)
-print("Name: \(name)")
+// Evaluate a simple navigation query
+let name = try await evaluate("self.name", in: context)
+print("Name: \(name as Any)")
 ```
 
 ### Collection Queries
 
 ```swift
-// Get all attributes of a class
-let attrsQuery = try parser.parse("self.attributes")
-let attributes = try await attrsQuery.evaluate(in: context, self: myClass)
+// Get all attributes of an entity
+let attributes = try await evaluate("self.attributes", in: context)
 
 // Filter to required attributes only
-let requiredQuery = try parser.parse("self.attributes->select(a | a.isRequired)")
-let required = try await requiredQuery.evaluate(in: context, self: myClass)
+let required = try await evaluate("self.attributes->select(a | a.isRequired)", in: context)
 
 // Get attribute names
-let namesQuery = try parser.parse("self.attributes->collect(a | a.name)")
-let names = try await namesQuery.evaluate(in: context, self: myClass)
+let names = try await evaluate("self.attributes->collect(a | a.name)", in: context)
 ```
 
 ### String Operations
 
 ```swift
 // Uppercase
-let upperQuery = try parser.parse("self.name.toUpper()")
+let upper = try await evaluate("self.name.toUpper()", in: context)
 
 // Concatenation
-let concatQuery = try parser.parse("self.name.concat('.swift')")
+let file = try await evaluate("self.name.concat('.swift')", in: context)
 
 // Check prefix
-let prefixQuery = try parser.parse("self.name.startsWith('get')")
+let isGetter = try await evaluate("self.name.startsWith('get')", in: context)
 ```
 
 ## Using Variables
@@ -104,21 +118,19 @@ Register variables in the context for use in queries:
 context.setVariable("threshold", value: 10)
 
 // Use in a query
-let query = try parser.parse("self.attributes->select(a | a.length > threshold)")
-let result = try await query.evaluate(in: context, self: myClass)
+let result = try await evaluate("self.attributes->select(a | a.length > threshold)", in: context)
 ```
 
 ## Conditional Expressions
 
 ```swift
-let conditionalQuery = try parser.parse("""
+let description = try await evaluate("""
     if self.isAbstract then
         'abstract class'
     else
         'concrete class'
     endif
-""")
-let description = try await conditionalQuery.evaluate(in: context, self: myClass)
+    """, in: context)
 ```
 
 ## Let Expressions
@@ -126,11 +138,10 @@ let description = try await conditionalQuery.evaluate(in: context, self: myClass
 Define local variables within expressions:
 
 ```swift
-let letQuery = try parser.parse("""
+let result = try await evaluate("""
     let upper = self.name.toUpper() in
     upper.concat('_SUFFIX')
-""")
-let result = try await letQuery.evaluate(in: context, self: myClass)
+    """, in: context)
 ```
 
 ## Common Query Patterns
@@ -170,8 +181,8 @@ let result = try await letQuery.evaluate(in: context, self: myClass)
 // Cast to specific type
 "self.oclAsType(Entity)"
 
-// Get the type
-"self.oclType()"
+// Get the metaclass
+"self.eClass()"
 ```
 
 ## Error Handling
@@ -180,11 +191,10 @@ Handle parsing and evaluation errors:
 
 ```swift
 do {
-    let query = try parser.parse("invalid query syntax")
-    let result = try await query.evaluate(in: context, self: element)
-} catch let error as AQLParseError {
+    let result = try await evaluate("invalid query syntax", in: context)
+} catch let error as AQLSyntaxError {
     print("Parse error: \(error)")
-} catch let error as AQLError {
+} catch let error as AQLExecutionError {
     print("Evaluation error: \(error)")
 }
 ```
@@ -197,11 +207,14 @@ do {
 
 ```swift
 // Parse once
-let query = try parser.parse("self.attributes->select(a | a.isRequired)")
+let parsed = AQLParser().parse("self.attributes->select(a | a.isRequired)")
 
 // Evaluate multiple times
-for element in elements {
-    let result = try await query.evaluate(in: context, self: element)
+if let query = parsed.expression {
+    for element in elements {
+        context.setVariable("self", value: element)
+        let result = try await query.evaluate(in: context)
+    }
 }
 ```
 
@@ -210,4 +223,4 @@ for element in elements {
 - <doc:UnderstandingAQL> - Deep dive into AQL concepts
 - ``AQLExpression`` - Expression API reference
 - ``AQLExecutionContext`` - Context configuration
-- ``AQLCollectionOperations`` - Collection operation reference
+- ``AQLCollectionServices`` - Collection service reference
