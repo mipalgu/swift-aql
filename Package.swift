@@ -12,6 +12,10 @@ let package = Package(
             name: "AQL",
             targets: ["AQL"]
         ),
+        .library(
+            name: "AQLMultiLevel",
+            targets: ["AQLMultiLevel"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-collections", from: "1.0.0"),
@@ -30,11 +34,36 @@ let package = Package(
                 .enableUpcomingFeature("StrictConcurrency")
             ]
         ),
+        .target(
+            name: "AQLMultiLevel",
+            dependencies: [
+                "AQL",
+                .product(name: "ECore", package: "swift-ecore"),
+                .product(name: "EMFBase", package: "swift-ecore"),
+                .product(name: "MultiLevel", package: "swift-ecore"),
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency")
+            ]
+        ),
+        .testTarget(
+            name: "AQLMultiLevelTests",
+            dependencies: [
+                "AQLMultiLevel",
+                "AQL",
+                .product(name: "ECore", package: "swift-ecore"),
+                .product(name: "MultiLevel", package: "swift-ecore"),
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency")
+            ]
+        ),
         .testTarget(
             name: "AQLTests",
             dependencies: [
                 "AQL",
                 .product(name: "ECore", package: "swift-ecore"),
+                .product(name: "OCL", package: "swift-ecore"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")

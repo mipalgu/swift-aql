@@ -126,6 +126,12 @@ public final class AQLExecutionContext: Sendable {
     /// How many times the registered resources have been asked for a container.
     private(set) var containerLookups = 0
 
+    /// The recorder of the model reads made while dependencies are recorded.
+    ///
+    /// Nothing is recorded unless a frame is open, which only
+    /// ``recordingDependencies(_:)`` and the incremental evaluators of this package do.
+    var dependencyRecorder = ModelDependencyRecorder()
+
     // MARK: - Initialisation
 
     /// Creates a new AQL execution context with the given options.
@@ -298,6 +304,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Returns: The container, or `nil` if no registered resource holds the object in a
     ///   containment reference.
     private func resourceContainer(of id: EUUID) async -> (any EObject)? {
+        if dependencyRecorder.isRecording { dependencyRecorder.recordContainer(of: id) }
         if cachesContainmentIndex, let cached = cachedContainers[id] { return cached }
         containerLookups += 1
         var found: (any EObject)?
@@ -321,6 +328,7 @@ public final class AQLExecutionContext: Sendable {
     ///   registered objects.
     /// - Throws: Any error raised while reading the contents of registered objects.
     private func registeredParents() async throws -> [EUUID: any EObject] {
+        if dependencyRecorder.isRecording { dependencyRecorder.recordContainmentStructure() }
         if cachesContainmentIndex, let containmentIndex { return containmentIndex }
         var index: [EUUID: any EObject] = [:]
         for resource in resources {
@@ -332,6 +340,82 @@ public final class AQLExecutionContext: Sendable {
         }
         if cachesContainmentIndex { containmentIndex = index }
         return index
+    }
+
+    // MARK: - Dependency Recording
+
+    /// Evaluates a body while recording the model reads that it makes.
+    ///
+    /// Every navigation, enumeration of instances and containment query that the body makes
+    /// through this context is recorded, so that the result can be recomputed only when a
+    /// change affects it (see ``ModelDependencies/isAffected(by:)``). Calls of services that
+    /// clients registered, which may read the models in ways the context cannot see, make
+    /// the record unbounded. Recordings may be nested; the reads of an inner recording are
+    /// also part of the outer one. Outside a recording, nothing is recorded.
+    ///
+    /// - Parameter body: The evaluation to record.
+    /// - Returns: The body's result and the dependencies it recorded.
+    /// - Throws: Whatever the body throws; the reads recorded before the error are then
+    ///   part of any enclosing recording.
+    public func recordingDependencies<T>(
+        _ body: () async throws -> T
+    ) async rethrows -> (value: T, dependencies: ModelDependencies) {
+        dependencyRecorder.begin()
+        do {
+            let value = try await body()
+            return (value, dependencyRecorder.end())
+        } catch {
+            dependencyRecorder.end()
+            throw error
+        }
+    }
+
+    /// Records the enumeration of the instances of a type.
+    ///
+    /// The root type of all objects, and the type of any value, depend on every creation
+    /// and deletion, which the containment structure stands for.
+    ///
+    /// - Parameter type: The type whose instances are enumerated.
+    func recordExtent(of type: AQLTypeDescriptor) {
+        if type.typeName == AQLBuiltInType.any || type.typeName == AQLEcoreMetaTypes.root {
+            dependencyRecorder.recordContainmentStructure()
+        } else {
+            dependencyRecorder.recordExtent(type.typeName)
+        }
+    }
+
+    /// Whether model reads are being recorded.
+    public var isRecordingDependencies: Bool { dependencyRecorder.isRecording }
+
+    /// Records the read of a feature, or of a containment property, of an object.
+    ///
+    /// - Parameters:
+    ///   - property: The name of the feature or containment property.
+    ///   - object: The object read from.
+    func recordRead(of property: String, from object: any EObject) {
+        let feature = (object.eClass as? EClass)?.getStructuralFeature(name: property)
+        if feature == nil, let navigation = EObjectNavigationProperty(rawValue: property) {
+            switch navigation {
+            case .eContainer, .eContainingFeature:
+                dependencyRecorder.recordContainer(of: object.id)
+            case .eContents:
+                dependencyRecorder.recordObject(object.id)
+            case .eAllContents:
+                dependencyRecorder.recordObject(object.id)
+                dependencyRecorder.recordContainmentStructure()
+            }
+            return
+        }
+        dependencyRecorder.recordFeature(property, of: object.id)
+        if let attribute = feature as? EAttribute, attribute.derived || attribute.volatile {
+            dependencyRecorder.recordUnbounded()
+        } else if let reference = feature as? EReference {
+            if reference.derived || reference.volatile {
+                dependencyRecorder.recordUnbounded()
+            } else if reference.transient {
+                dependencyRecorder.recordContainer(of: object.id)
+            }
+        }
     }
 
     // MARK: - Collections
@@ -417,6 +501,7 @@ public final class AQLExecutionContext: Sendable {
             if let selfObject = (try? await getVariable("self")) as? (any EObject) {
                 // Try to navigate from self
                 // Note: In strict AQL, this might only happen if the variable lookup fails.
+                if dependencyRecorder.isRecording { recordRead(of: name, from: selfObject) }
                 if let result = try? await executionEngine.navigate(
                     from: selfObject, property: name)
                 {
@@ -508,6 +593,7 @@ public final class AQLExecutionContext: Sendable {
             return nil
         }
 
+        if dependencyRecorder.isRecording { recordRead(of: property, from: eObject) }
         let value = try await executionEngine.navigate(from: eObject, property: property)
         guard Self.hasNoValue(value), Self.isComputed(property, of: eObject),
             let service = services.find(

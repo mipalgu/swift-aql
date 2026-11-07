@@ -14,6 +14,9 @@ A pure Swift implementation of the Acceleo Query Language (AQL).
 - **AQL Compatibility**: Conforms to Eclipse AQL by default, with options to emulate earlier behaviour
 - **EMF Integration**: Built on top of `swift-ecore` for seamless model querying
 - **Extensible**: Clients add their own services through `AQLServiceProvider`
+- **Incremental queries**: re-evaluated only when a model change affects what they read
+- **Multi-level models**: deep constraints and services through the `AQLMultiLevel` library
+- **OCL translation**: OCL constraints translated into AQL by `OCLToAQLTranslator`
 - **Performance**: Optimized for fast model navigation and querying
 
 ## Requirements
@@ -33,7 +36,7 @@ dependencies: [
 ]
 ```
 
-And add `"AQL"` to your target's dependencies.
+And add `"AQL"` to your target's dependencies, and `"AQLMultiLevel"` for multi-level models.
 
 ## Usage
 
