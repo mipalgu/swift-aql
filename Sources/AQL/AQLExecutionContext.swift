@@ -497,7 +497,7 @@ public final class AQLExecutionContext: Sendable {
         if let items = AQLValues.elements(of: object) {
             var collected: [any EcoreValue] = []
             for item in items {
-                if let value = try await navigate(from: item, property: property) {
+                if let value = try await navigate(from: item, property: property, range: range) {
                     collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
                 }
             }
@@ -533,7 +533,7 @@ public final class AQLExecutionContext: Sendable {
     private func navigateElement(_ element: any EcoreValue, property: String) async throws -> AQLElementResult {
         guard let object = element as? any EObject else { return .missing }
         do {
-            return .value(try await navigate(from: object, property: property))
+            return .value(try await navigate(from: object, property: property, range: nil))
         } catch {
             guard
                 let service = services.find(
