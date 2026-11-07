@@ -326,7 +326,7 @@ struct AQLDotCallTests {
     func noMigrationWarning(_ source: String) async throws {
         let context = DotCallFixture.context(.standard)
         try await Self.evaluate(source, in: context)
-        #expect(context.diagnostics.isEmpty)
+        #expect(!context.diagnostics.contains { $0.code == AQLDiagnosticCode.dotCallOnElements })
     }
 
     @Test(

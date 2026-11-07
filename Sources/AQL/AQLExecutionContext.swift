@@ -57,6 +57,10 @@ public final class AQLExecutionContext: Sendable {
     /// Evaluation reports a warning with the code ``AQLDiagnosticCode/dotCallOnElements`` and
     /// the range of the call when a dot call on a collection reaches an element that has no
     /// service of the name while the collection has one (see ``AQLDotCalls/eachElement``).
+    /// A navigation or another dot call on a collection that leaves out elements without the
+    /// feature or the service reports a warning with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` or ``AQLDiagnosticCode/serviceNotFound`` for each
+    /// type of element left out, unless strict mode raises an error because no element has it.
     /// The diagnostics accumulate across evaluations: a client that wants the warnings of a
     /// single evaluation calls ``clearDiagnostics()`` before it. A diagnostic equal to one
     /// already held (with the same severity, code, message and range) is not added again, so
@@ -453,14 +457,41 @@ public final class AQLExecutionContext: Sendable {
     /// elements has the feature raises an error instead. When a derived,
     /// volatile or transient feature of an object has no value (nil or an empty collection), a
     /// client-registered zero-argument service of the same name is called on the object instead,
-    /// so that templates can compute such features without writing parentheses.
+    /// so that templates can compute such features without writing parentheses. Each type of
+    /// element left out is reported once in ``diagnostics`` as a warning with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` and no range.
     /// - Returns: Navigation result, or nil if source is nil or not an EObject
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
+        any EcoreValue
+    )? {
+        try await navigate(from: object, property: property, range: nil)
+    }
+
+    /// Navigates a property from a source object, reporting the elements left out with the
+    /// range of the navigation.
+    ///
+    /// The navigation is that of ``navigate(from:property:)``. The warnings with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` that it reports carry the given range.
+    ///
+    /// - Parameters:
+    ///   - object: The source object or collection.
+    ///   - property: The name of the feature.
+    ///   - range: Where the navigation was written, if known.
+    /// - Returns: The navigation result, or `nil` if the source is `nil` or not an object.
+    /// - Throws: Any error raised by the navigation.
+    func navigate(from object: (any EcoreValue)?, property: String, range: SourceRange?) async throws -> (
         any EcoreValue
     )? {
         if let collection = object, options.dotCalls == .eachElement, AQLValues.elements(of: collection) != nil {
             return try await applyToEachElement(of: collection, named: property) { element in
                 try await navigateElement(element, property: property)
+            } reportingMissing: { types in
+                for type in types {
+                    report(
+                        SourceDiagnostic(
+                            severity: .warning, code: AQLDiagnosticCode.featureNotFound,
+                            message: AQLDiagnosticMessage.featureNotFound(property, in: type), range: range))
+                }
             }
         }
         if let items = AQLValues.elements(of: object) {
@@ -522,19 +553,23 @@ public final class AQLExecutionContext: Sendable {
     /// turn. The results are collected in a collection of the kind of the receiver (see
     /// ``collectionKind(of:)``): a result that is a collection contributes its elements, and a
     /// null result or an element for which the call reports ``AQLElementResult/missing``
-    /// contributes nothing.
+    /// contributes nothing. Once every element has been reached, the types of the elements left
+    /// out go to `reportMissing`, unless strict mode raises an error instead.
     ///
     /// - Parameters:
     ///   - receiver: The collection to apply the call to.
     ///   - name: The name of the service or feature, for the error that strict mode raises.
     ///   - apply: The call on one element that is not a collection.
+    ///   - reportMissing: Receives the distinct types of the elements for which the call reports
+    ///     ``AQLElementResult/missing``, in the order first reached, if there are any.
     /// - Returns: The collected results.
     /// - Throws: ``AQLExecutionError/invalidOperation(_:)`` in strict mode if the call reports
     ///   ``AQLElementResult/missing`` for every element it reaches and there is at least one
     ///   such element, and any error that `apply` throws.
     func applyToEachElement(
         of receiver: any EcoreValue, named name: String,
-        _ apply: (any EcoreValue) async throws -> AQLElementResult
+        _ apply: (any EcoreValue) async throws -> AQLElementResult,
+        reportingMissing reportMissing: ([AQLValueType]) -> Void
     ) async throws -> EcoreValueArray {
         var reach = AQLElementReach()
         let result = try await applyToEachElement(of: receiver, reach: &reach, apply)
@@ -542,6 +577,7 @@ public final class AQLExecutionContext: Sendable {
             throw AQLExecutionError.invalidOperation(
                 "No element of the collection has a service or feature named '\(name)'")
         }
+        if !reach.missedTypes.isEmpty { reportMissing(reach.missedTypes.elements) }
         return result
     }
 
@@ -568,7 +604,7 @@ public final class AQLExecutionContext: Sendable {
                     reach.found = true
                     value = result
                 case .missing:
-                    reach.missed = true
+                    reach.missedTypes.append(AQLValueType(of: element))
                     value = nil
                 }
             }
@@ -609,12 +645,41 @@ struct AQLElementReach {
     /// Whether some element has the service or the feature.
     var found = false
 
-    /// Whether some element lacks the service or the feature.
-    var missed = false
+    /// The distinct types of the elements that lack the service or the feature, in the order
+    /// first reached.
+    var missedTypes: OrderedSet<AQLValueType> = []
 
     /// Whether every element reached lacks the service or the feature, and at least one was
     /// reached.
-    var missesEveryElement: Bool { missed && !found }
+    var missesEveryElement: Bool { !missedTypes.isEmpty && !found }
+}
+
+/// The type of a value as diagnostics name it.
+struct AQLValueType: Hashable {
+    /// The name of the type: the class name of an object, the AQL name of a primitive type, the
+    /// kind of a collection, or `null`.
+    let name: String
+
+    /// Whether the value is a model object.
+    let isObject: Bool
+
+    /// Determines the type of a value.
+    ///
+    /// - Parameter value: The value.
+    init(of value: (any EcoreValue)?) {
+        isObject = value is any EObject
+        switch value {
+        case nil: name = AQLSyntax.nullText
+        case let object as any EObject: name = object.eClass.name
+        case is String: name = AQLBuiltInType.string
+        case is Bool: name = AQLBuiltInType.boolean
+        case is Double, is Float: name = AQLBuiltInType.real
+        case let value? where AQLValues.integer(value) != nil: name = AQLBuiltInType.integer
+        case let value? where AQLValues.kind(of: value) != nil:
+            name = AQLValues.kind(of: value)?.rawValue ?? String(describing: type(of: value))
+        case let value?: name = String(describing: type(of: value))
+        }
+    }
 }
 
 /// Errors that can occur during AQL execution.

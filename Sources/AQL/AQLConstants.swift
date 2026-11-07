@@ -169,14 +169,22 @@ public enum AQLSyntax {
 public enum AQLBuiltInType {
     /// The universal type.
     public static let any = "OclAny"
+    /// The name of the string type.
+    static let string = "String"
+    /// The name of the integer type.
+    static let integer = "Integer"
+    /// The name of the real type.
+    static let real = "Real"
+    /// The name of the boolean type.
+    static let boolean = "Boolean"
     /// Names denoting strings.
-    public static let strings: Set<String> = ["String", "EString"]
+    public static let strings: Set<String> = [string, "EString"]
     /// Names denoting integers.
-    public static let integers: Set<String> = ["Integer", "Int", "EInt", "ELong", "EShort", "EByte"]
+    public static let integers: Set<String> = [integer, "Int", "EInt", "ELong", "EShort", "EByte"]
     /// Names denoting reals.
-    public static let reals: Set<String> = ["Real", "Double", "Float", "EDouble", "EFloat"]
+    public static let reals: Set<String> = [real, "Double", "Float", "EDouble", "EFloat"]
     /// Names denoting booleans.
-    public static let booleans: Set<String> = ["Boolean", "Bool", "EBoolean"]
+    public static let booleans: Set<String> = [boolean, "Bool", "EBoolean"]
     /// Names denoting collections.
     public static let collections: Set<String> = [
         "Collection", "Sequence", "OrderedSet", "Set", "Bag",

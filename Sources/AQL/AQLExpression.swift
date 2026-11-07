@@ -93,7 +93,7 @@ public struct AQLNavigationExpression: AQLExpression {
         }
 
         do {
-            return try await context.navigate(from: sourceValue, property: property)
+            return try await context.navigate(from: sourceValue, property: property, range: origin.range)
         } catch {
             // Fall back to a zero-argument service registered by the client, unless the
             // navigation applies to each element of a collection.

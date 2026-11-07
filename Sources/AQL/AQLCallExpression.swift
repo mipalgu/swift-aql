@@ -54,7 +54,9 @@ import Foundation
 /// collection contributes its elements, and a null result, or an element that has no service
 /// of the name for arguments of their types, contributes nothing. The arguments are evaluated
 /// once for all elements. When an element has no such service but the collection has one, the
-/// call reports a warning in ``AQLExecutionContext/diagnostics``.
+/// call reports a warning with the code ``AQLDiagnosticCode/dotCallOnElements`` in
+/// ``AQLExecutionContext/diagnostics``; otherwise it reports a warning with the code
+/// ``AQLDiagnosticCode/serviceNotFound`` once for each type of element without the service.
 ///
 /// ## Iterator arguments
 ///
@@ -119,14 +121,27 @@ public struct AQLCallExpression: AQLExpression {
             AQLValues.elements(of: collection) != nil
         {
             var arguments = AQLCallArguments(argumentExpressions)
-            var hasWarned = false
+            var collectionHasService: Bool?
             return try await context.applyToEachElement(of: collection, named: methodName) { element in
                 let result = try await call(on: element, arguments: &arguments, in: context)
-                if case .missing = result, !hasWarned {
-                    hasWarned = true
-                    warnIfCollectionHasService(collection, argumentCount: arguments.count, in: context)
+                if case .missing = result, collectionHasService == nil {
+                    collectionHasService = warnIfCollectionHasService(
+                        collection, argumentCount: arguments.count, in: context)
                 }
                 return result
+            } reportingMissing: { types in
+                guard collectionHasService != true else { return }
+                let argumentTypes: [AQLValueType?] =
+                    arguments.evaluatedValues?.map { AQLValueType(of: $0) }
+                    ?? Array(repeating: nil, count: arguments.count)
+                for type in types {
+                    context.report(
+                        SourceDiagnostic(
+                            severity: .warning, code: AQLDiagnosticCode.serviceNotFound,
+                            message: AQLDiagnosticMessage.serviceNotFound(
+                                methodName, for: type, argumentTypes: argumentTypes),
+                            range: origin.range))
+                }
             }
         }
 
@@ -205,20 +220,22 @@ public struct AQLCallExpression: AQLExpression {
     ///   - collection: The receiver of the call.
     ///   - argumentCount: The number of arguments of the call.
     ///   - context: The context that collects the warning.
+    /// - Returns: Whether the collection has the service, so that the warning was reported.
     @MainActor
     private func warnIfCollectionHasService(
         _ collection: any EcoreValue, argumentCount: Int, in context: AQLExecutionContext
-    ) {
+    ) -> Bool {
         guard
             context.services.find(
                 name: methodName, receiver: collection, hasReceiver: true, argumentCount: argumentCount) != nil
-        else { return }
+        else { return false }
         context.report(
             SourceDiagnostic(
                 severity: .warning, code: AQLDiagnosticCode.dotCallOnElements,
                 message: "'.\(methodName)()' applies to each element of the collection, and an element has no "
                     + "'\(methodName)' service; write '->\(methodName)()' to call the service of the collection",
                 range: origin.range))
+        return true
     }
 
     /// The receiver of an arrow call as a collection.
@@ -286,6 +303,10 @@ struct AQLCallArguments {
 
     /// The number of arguments.
     var count: Int { expressions.count }
+
+    /// The argument values evaluated so far, as plain values if evaluated in that form, or
+    /// `nil` if they have not been evaluated.
+    var evaluatedValues: [(any EcoreValue)?]? { plainValues ?? typedValues }
 
     /// The argument values in the form that a service needs.
     ///

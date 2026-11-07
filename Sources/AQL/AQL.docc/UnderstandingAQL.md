@@ -85,6 +85,11 @@ result whatever ``AQLOptions/dotCalls`` says (see
 When a dot call reaches an element without the service while the collection has a service of
 that name, as in `Sequence{1, 2}.size()`, the context records a warning with the code
 ``AQLDiagnosticCode/dotCallOnElements`` and the range of the call, suggesting `->size()`.
+Otherwise, as in Eclipse AQL, a navigation or dot call that leaves out elements records a
+warning with the code ``AQLDiagnosticCode/featureNotFound`` (such as `Feature genre not found
+in EClass Periodical`) or ``AQLDiagnosticCode/serviceNotFound`` (such as `Couldn't find the
+'toUpper(Integer)' service`) for each type of element left out, unless strict mode raises an
+error because no element has the feature or service.
 ``AQLExecutionContext/diagnostics`` lists the warnings oldest first, each one once, and keeps
 a warning even when strict mode then raises an error;
 ``AQLExecutionContext/clearDiagnostics()`` empties the list.
