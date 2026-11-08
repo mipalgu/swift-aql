@@ -17,14 +17,25 @@ public struct OCLToAQLTranslation: Sendable {
     /// some cases (warnings), or that rely on services outside the AQL library (information).
     public var diagnostics: [SourceDiagnostic]
 
+    /// The AQL text of the message of an invariant, if the expression carries one.
+    ///
+    /// An invariant with a message, which Eclipse OCL stores as a tuple of the message and the
+    /// status, translates into the AQL text of its status, ``aql``, and the AQL text of its
+    /// message, which describes a violation for the object that violates the invariant. It is
+    /// `nil` for an expression without a message, if the status has no translation, or if the
+    /// message has none.
+    public var message: String?
+
     /// Creates a translation.
     ///
     /// - Parameters:
     ///   - aql: The AQL text, if every construct was translated.
     ///   - diagnostics: The notes about the translation.
-    public init(aql: String?, diagnostics: [SourceDiagnostic]) {
+    ///   - message: The AQL text of the message of an invariant, if any.
+    public init(aql: String?, diagnostics: [SourceDiagnostic], message: String? = nil) {
         self.aql = aql
         self.diagnostics = diagnostics
+        self.message = message
     }
 
     /// Whether every construct of the expression was translated.
@@ -48,7 +59,12 @@ public struct OCLToAQLTranslation: Sendable {
 /// - `oclType()` becomes `eClass()`, `selectByKind` becomes `filter`, `collectNested`
 ///   becomes `collect` and `?->` drops null elements before the call.
 ///
-/// Constructs without an AQL counterpart (`iterate`, tuples, maps, ranges in collection
+/// An invariant with a message, which Eclipse OCL stores in the form
+/// `Tuple { message : String = <message>, status : Boolean = <expression> }.status`,
+/// translates into its status, the AQL text of the expression, and carries the AQL text of
+/// its message in ``OCLToAQLTranslation/message``.
+///
+/// Constructs without an AQL counterpart (`iterate`, other tuples, maps, ranges in collection
 /// literals, `@pre`, `invalid`, messages, lambdas and `oclIsInvalid`) are reported as
 /// `OCLDiagnosticCode.untranslatable` errors and leave the translation without text.
 /// Translations whose meaning can differ, such as `collectNested`, `?.`, or a string's
@@ -120,9 +136,52 @@ public struct OCLToAQLTranslator: Sendable {
 
     /// Translates a parsed OCL expression.
     ///
+    /// An invariant in the tuple form of Eclipse OCL translates into its status and carries its
+    /// message (see ``OCLToAQLTranslation/message``). A message without a translation is left
+    /// out with a `OCLDiagnosticCode.semanticGap` warning, and the status is still translated.
+    ///
     /// - Parameter expression: The OCL expression.
     /// - Returns: The translation.
     public func translate(_ expression: OCLExpression) -> OCLToAQLTranslation {
+        guard let parts = Self.invariantParts(of: expression) else { return translateValue(expression) }
+        var translation = translateValue(parts.status)
+        guard translation.isComplete, let message = parts.message else { return translation }
+        let translatedMessage = translateValue(message)
+        translation.diagnostics += translatedMessage.diagnostics.filter { $0.severity != .error }
+        if let text = translatedMessage.aql {
+            translation.message = text
+        } else {
+            translation.diagnostics.append(
+                SourceDiagnostic(
+                    severity: .warning, code: OCLDiagnosticCode.semanticGap,
+                    message: "The message of the invariant has no AQL translation, so a violation is reported without it",
+                    range: message.range))
+        }
+        return translation
+    }
+
+    /// The parts of an invariant that Eclipse OCL stores as a tuple of its message and its status.
+    ///
+    /// - Parameter expression: The OCL expression of the invariant.
+    /// - Returns: The expression of the status and, if the tuple has one, the expression of
+    ///   the message; `nil` if the expression is not the status of a tuple that has only these
+    ///   parts.
+    static func invariantParts(of expression: OCLExpression) -> (status: OCLExpression, message: OCLExpression?)? {
+        let names = [OCLConstraintAnnotations.statusPart, OCLConstraintAnnotations.messagePart]
+        guard case .call(let call) = expression.kind, call.name == OCLConstraintAnnotations.statusPart,
+            call.navigation == ".", call.arguments == nil, !call.isPre, call.qualifier.isEmpty,
+            let source = call.source, case .tupleLiteral(let parts) = source.kind,
+            parts.allSatisfy({ names.contains($0.name) }),
+            let status = parts.first(where: { $0.name == OCLConstraintAnnotations.statusPart })?.initialiser
+        else { return nil }
+        return (status, parts.first { $0.name == OCLConstraintAnnotations.messagePart }?.initialiser)
+    }
+
+    /// Translates a parsed OCL expression that is not an invariant tuple.
+    ///
+    /// - Parameter expression: The OCL expression.
+    /// - Returns: The translation, without a message.
+    private func translateValue(_ expression: OCLExpression) -> OCLToAQLTranslation {
         var state = State(translator: self)
         let text = state.emit(expression)
         var aql: String? = text

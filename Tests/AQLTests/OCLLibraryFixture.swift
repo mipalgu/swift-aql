@@ -99,6 +99,20 @@ struct OCLLibraryFixture {
         context.setVariable(OCLSyntax.selfKeyword, value: object ?? library)
         return try await expression.evaluate(in: context)
     }
+
+    /// Evaluates an AQL expression for an object.
+    ///
+    /// - Parameters:
+    ///   - aql: The AQL expression, such as the message of a translated invariant.
+    ///   - object: The context object, by default the library.
+    /// - Returns: The value of the expression.
+    func evaluateAQL(_ aql: String, for object: DynamicEObject? = nil) async throws -> (any EcoreValue)? {
+        let parsed = AQLParser().parse(aql)
+        guard let expression = parsed.expression else { throw OCLTranslationFailure(diagnostics: parsed.diagnostics) }
+        let context = await makeContext()
+        context.setVariable(OCLSyntax.selfKeyword, value: object ?? library)
+        return try await expression.evaluate(in: context)
+    }
 }
 
 /// The error thrown when an expression cannot be translated or the translation cannot be parsed.

@@ -127,6 +127,51 @@ struct OCLToAQLTranslatorTests {
         #expect(translation.diagnostics.contains { $0.code == OCLDiagnosticCode.semanticGap && $0.severity == severity })
     }
 
+    @Test("An invariant in Eclipse's tuple form translates its status and carries its message", arguments: [
+        ("Tuple {\n\tmessage : String = 'Too many copies of ' + title,\n\tstatus : Boolean = copies <= 2\n}.status",
+         "copies <= 2", "'Too many copies of ' + title"),
+        ("Tuple{status = copies <= 2, message = 'Too many copies'}.status", "copies <= 2", "'Too many copies'"),
+        ("Tuple{message : String = 'Clash in ' + self.name, status : Boolean = books->select(title = self.name)->isEmpty()}.status",
+         "let oclSelf = self in books->select(title = oclSelf.name)->isEmpty()", "'Clash in ' + self.name"),
+        ("Tuple{status : Boolean = copies <= 2}.status", "copies <= 2", nil),
+    ])
+    func invariantTuples(_ ocl: String, _ status: String, _ message: String?) async throws {
+        let translation = await Self.translator().translate(ocl)
+        #expect(translation.aql == status, "\(translation.diagnostics.map(\.message))")
+        #expect(translation.message == message)
+        #expect(translation.diagnostics.allSatisfy { $0.severity != .error })
+    }
+
+    @Test("The status and the message of an invariant tuple evaluate for each book")
+    func invariantTupleEvaluation() async throws {
+        let fixture = await OCLLibraryFixture()
+        let ocl = "Tuple{message : String = 'Too many copies of ' + title, status : Boolean = copies <= 2}.status"
+        #expect(try await fixture.evaluate(ocl, for: fixture.books[0]) as? Bool == true)
+        #expect(try await fixture.evaluate(ocl, for: fixture.books[1]) as? Bool == false)
+        let message = try #require(OCLToAQLTranslator(packages: [fixture.package]).translate(ocl).message)
+        let title = try #require(try await fixture.evaluate("title", for: fixture.books[1]) as? String)
+        #expect(try await fixture.evaluateAQL(message, for: fixture.books[1]) as? String == "Too many copies of " + title)
+    }
+
+    @Test("A message without an AQL translation leaves the status to be checked without it")
+    func untranslatableInvariantMessage() async throws {
+        let translation = await Self.translator().translate(
+            "Tuple{message : String = Tuple{a = 1}.a.toString(), status : Boolean = copies <= 2}.status")
+        #expect(translation.aql == "copies <= 2")
+        #expect(translation.message == nil)
+        #expect(translation.diagnostics.contains { $0.code == OCLDiagnosticCode.semanticGap && $0.severity == .warning })
+        #expect(translation.diagnostics.allSatisfy { $0.severity != .error })
+    }
+
+    @Test("A status without an AQL translation leaves the invariant untranslated")
+    func untranslatableInvariantStatus() async throws {
+        let translation = await Self.translator().translate(
+            "Tuple{message : String = 'x', status : Boolean = books->iterate(b; n : Integer = 0 | n + b.copies) > 0}.status")
+        #expect(translation.aql == nil)
+        #expect(translation.message == nil)
+        #expect(translation.diagnostics.contains { $0.code == OCLDiagnosticCode.untranslatable })
+    }
+
     @Test("Without packages, qualified names are kept")
     func withoutPackages() {
         let translation = OCLToAQLTranslator().translate("genre = Genre::fiction")

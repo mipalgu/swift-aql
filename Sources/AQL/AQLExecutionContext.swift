@@ -91,8 +91,9 @@ public final class AQLExecutionContext: Sendable {
 
     /// Whether `indexOf` and `lastIndexOf` on collections return 1-based positions (0 if absent) as AQL specifies.
     ///
-    /// The default (`true`) follows the AQL specification. Set it to `false` to get the earlier
-    /// behaviour of this package: 0-based positions, -1 if absent.
+    /// The default (`true`) follows the
+    /// [AQL specification](https://eclipse.dev/acceleo/documentation/). Set it to `false` to get
+    /// the earlier behaviour of this package: 0-based positions, -1 if absent.
     public var usesOneBasedIndexOf: Bool = true
 
     /// Whether the containers found by containment queries are cached between calls.
