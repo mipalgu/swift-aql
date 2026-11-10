@@ -24,6 +24,8 @@ whilst providing a type-safe Swift API for integration with the ECore metamodell
 - **Type operations**: Type checking, casting, and reflection
 - **Boolean logic**: Full support for logical expressions
 - **Conditionals**: If-then-else expressions
+- **Incremental queries**: Values kept up to date as the models change, re-evaluating only
+  the expressions that a change affects; see <doc:IncrementalQueries>
 
 ### Quick Example
 
@@ -51,6 +53,7 @@ if let query = parsed.expression {
 
 - <doc:GettingStarted>
 - <doc:UnderstandingAQL>
+- <doc:IncrementalQueries>
 
 ### Execution
 
@@ -91,6 +94,11 @@ if let query = parsed.expression {
 - ``AQLSyntax``
 - ``AQLTreePrinter``
 - ``AQLDiagnosticCode``
+
+### Translation from OCL
+
+- ``OCLToAQLTranslator``
+- ``OCLToAQLTranslation``
 
 ### Services
 

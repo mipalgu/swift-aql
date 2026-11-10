@@ -93,12 +93,14 @@ public struct AQLNavigationExpression: AQLExpression {
         }
 
         do {
-            return try await context.navigate(from: sourceValue, property: property)
+            return try await context.navigate(from: sourceValue, property: property, range: origin.range)
         } catch {
-            // Fall back to a zero-argument service registered by the client.
-            if let service = context.services.find(
-                name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
-                customOnly: true)
+            // Fall back to a zero-argument service registered by the client, unless the
+            // navigation applies to each element of a collection.
+            if context.options.dotCalls == .collection || AQLValues.elements(of: sourceValue) == nil,
+                let service = context.services.find(
+                    name: property, receiver: sourceValue, hasReceiver: true, argumentCount: 0,
+                    customOnly: true)
             {
                 return try await service.invoke(
                     AQLServiceCall(
@@ -136,10 +138,19 @@ public struct AQLStringInterpolationExpression: AQLExpression {
     /// Where the expression was written, if known.
     public let origin: SourceOrigin
 
+    /// A piece of literal text, optionally followed by an interpolated expression.
     public struct Part: Sendable {
-        let literal: String
-        let expression: (any AQLExpression)?
+        /// The literal text of the part.
+        public let literal: String
 
+        /// The expression whose value follows the literal text, if any.
+        public let expression: (any AQLExpression)?
+
+        /// Creates a part of a string interpolation.
+        ///
+        /// - Parameters:
+        ///   - literal: The literal text.
+        ///   - expression: The expression whose value follows the text, if any.
         public init(literal: String, expression: (any AQLExpression)? = nil) {
             self.literal = literal
             self.expression = expression

@@ -79,6 +79,13 @@ public struct AQLLambdaExpression: AQLExpression {
     /// The iterator variable names.
     public let iterators: [String]
 
+    /// The types declared for the iterator variables, matching ``iterators`` by position.
+    ///
+    /// A type is written as in `e : ecore::EClass | body`; it is `nil` for an iterator
+    /// declared without one. The types describe the iterators for tools that analyse the
+    /// expression; they do not change how the lambda is evaluated.
+    public let iteratorTypes: [String?]
+
     /// The body expression.
     public let body: any AQLExpression
 
@@ -86,21 +93,27 @@ public struct AQLLambdaExpression: AQLExpression {
     ///
     /// - Parameters:
     ///   - iterator: The iterator variable name.
+    ///   - iteratorType: The type declared for the iterator, or `nil` (the default) for none.
     ///   - body: The body expression.
     ///   - origin: Where the expression was written, if known.
-    public init(iterator: String, body: any AQLExpression, origin: SourceOrigin = .init()) {
-        self.init(iterators: [iterator], body: body, origin: origin)
+    public init(iterator: String, iteratorType: String? = nil, body: any AQLExpression, origin: SourceOrigin = .init()) {
+        self.init(iterators: [iterator], iteratorTypes: [iteratorType], body: body, origin: origin)
     }
 
     /// Creates a lambda expression with several iterator variables.
     ///
     /// - Parameters:
     ///   - iterators: The iterator variable names.
+    ///   - iteratorTypes: The types declared for the iterators, by position; iterators beyond
+    ///     the end of the list are declared without a type (the default is none).
     ///   - body: The body expression.
     ///   - origin: Where the expression was written, if known.
-    public init(iterators: [String], body: any AQLExpression, origin: SourceOrigin = .init()) {
+    public init(
+        iterators: [String], iteratorTypes: [String?] = [], body: any AQLExpression, origin: SourceOrigin = .init()
+    ) {
         self.origin = origin
         self.iterators = iterators
+        self.iteratorTypes = iterators.indices.map { $0 < iteratorTypes.count ? iteratorTypes[$0] : nil }
         self.body = body
     }
 

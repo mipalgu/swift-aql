@@ -480,7 +480,8 @@ struct AQLGrammar<Delegate: AQLParserDelegate> {
         let start = cursor.startPosition
         if let header = try parseLambdaHeader() {
             let body = try parseExpression()
-            return AQLLambdaExpression(iterator: header.name, body: body, origin: cursor.origin(from: start))
+            return AQLLambdaExpression(
+                iterator: header.name, iteratorType: header.type, body: body, origin: cursor.origin(from: start))
         }
         if iterates {
             cursor.implicitReceiverDepth += 1

@@ -107,6 +107,7 @@ struct AQLOptionsTests {
         #expect(options.sequenceUnion == .concatenation)
         #expect(options.nullAddition == .emptyText)
         #expect(options.textForm == .joined)
+        #expect(options.dotCalls == .eachElement)
         #expect(!options.strict)
     }
 
@@ -120,6 +121,7 @@ struct AQLOptionsTests {
         #expect(options.sequenceUnion == .distinct)
         #expect(options.nullAddition == .null)
         #expect(options.textForm == .bracketed)
+        #expect(options.dotCalls == .collection)
         #expect(!options.strict)
         #expect(options != .standard)
         #expect(
@@ -127,7 +129,8 @@ struct AQLOptionsTests {
                 == AQLOptions(
                     collectionArguments: .firstElement, collectionKinds: .sequences,
                     singleValueCollections: .sequence, containerLookup: .registeredObjects,
-                    sequenceUnion: .distinct, nullAddition: .null, textForm: .bracketed))
+                    sequenceUnion: .distinct, nullAddition: .null, textForm: .bracketed,
+                    dotCalls: .collection))
     }
 
     @Test("Options can be changed one at a time")
@@ -143,6 +146,8 @@ struct AQLOptionsTests {
         options.nullAddition = .null
         #expect(options != .legacy)
         options.textForm = .bracketed
+        #expect(options != .legacy)
+        options.dotCalls = .collection
         #expect(options == .legacy)
         options.strict = true
         #expect(options != .legacy)
@@ -160,6 +165,8 @@ struct AQLOptionsTests {
         #expect(AQLSequenceUnion(rawValue: "distinct") == .distinct)
         #expect(AQLNullAddition.allCases.map(\.rawValue) == ["empty-text", "null"])
         #expect(AQLTextForm.allCases.map(\.rawValue) == ["joined", "bracketed"])
+        #expect(AQLDotCalls.allCases.map(\.rawValue) == ["each-element", "collection"])
+        #expect(AQLDotCalls(rawValue: "each-element") == .eachElement)
         #expect(AQLNullAddition(rawValue: "empty-text") == .emptyText)
         #expect(AQLCollectionArguments(rawValue: "first-element") == .firstElement)
         #expect(AQLContainerLookup(rawValue: "registered-objects") == .registeredObjects)
@@ -201,9 +208,10 @@ struct AQLOptionsTests {
     @Test("The initialisers with options register service providers")
     func initialisersRegisterProviders() async throws {
         let engine = ECoreExecutionEngine(models: [:])
+        let options = AQLOptions(dotCalls: .collection)
         let contexts = [
-            AQLExecutionContext(executionEngine: engine, options: .standard, serviceProviders: [KindReporter()]),
-            AQLExecutionContext(options: .standard, serviceProviders: [KindReporter()]),
+            AQLExecutionContext(executionEngine: engine, options: options, serviceProviders: [KindReporter()]),
+            AQLExecutionContext(options: options, serviceProviders: [KindReporter()]),
         ]
         for context in contexts {
             let result = try await OptionsFixture.value(of: "Bag{1}.reportKind()", in: context)
@@ -234,7 +242,7 @@ struct AQLOptionsTests {
             legacy: "Sequence{'d', 'a', 'b', 'c'}", standard: "Sequence{Sequence{'d', 'e'}, 'a', 'b', 'c'}"),
         .init(
             "Sequence{'a', 'b', 'c'}.including(OrderedSet{'d', 'e'})",
-            legacy: "Sequence{'a', 'b', 'c', 'd'}", standard: "Sequence{'a', 'b', 'c', OrderedSet{'d', 'e'}}"),
+            legacy: "Sequence{'a', 'b', 'c', 'd'}", standard: "Sequence{}"),
         .init("Sequence{'a'}->append(Sequence{})", legacy: "Sequence{'a'}", standard: "Sequence{'a', Sequence{}}"),
         .init("Sequence{'a'}->prepend(Sequence{})", legacy: "Sequence{'a'}", standard: "Sequence{Sequence{}, 'a'}"),
         .init("Sequence{'a'}->including(Sequence{})", legacy: "Sequence{'a'}", standard: "Sequence{'a', Sequence{}}"),
@@ -310,13 +318,13 @@ struct AQLOptionsTests {
         .init("Sequence{'a', 'b'} + null", legacy: "null", standard: "'ab'"),
         .init("null + Sequence{'a', 'b'}", legacy: "null", standard: "'ab'"),
         .init("null + 1", legacy: "null", standard: "'1'"),
-        .init("Sequence{'a'}.add(null)", legacy: "null", standard: "'a'"),
+        .init("Sequence{'a'}.add(null)", legacy: "null", standard: "Sequence{'a'}"),
         .init("'a'.add(null)", legacy: "null", standard: "'a'"),
         .init("Sequence{'a', 'b'}->toString()", legacy: "'[a, b]'", standard: "'ab'"),
-        .init("Sequence{'a', Sequence{'b', 'c'}}.toString()", legacy: "'[a, [b, c]]'", standard: "'abc'"),
-        .init("Sequence{}.toString()", legacy: "'[]'", standard: "''"),
+        .init("Sequence{'a', Sequence{'b', 'c'}}.toString()", legacy: "'[a, [b, c]]'", standard: "Sequence{'a', 'b', 'c'}"),
+        .init("Sequence{}.toString()", legacy: "'[]'", standard: "Sequence{}"),
         .init("null.toString()", legacy: "'null'", standard: "''"),
-        .init("Sequence{1, 2}.toString().size()", legacy: "6", standard: "2"),
+        .init("Sequence{1, 2}.toString().size()", legacy: "6", standard: "Sequence{1, 1}"),
         .init("1 + 2", both: "3"),
         .init("Sequence{'a'} - null", both: "null"),
     ]
@@ -355,7 +363,7 @@ struct AQLOptionsTests {
 
     @Test("Only the first element of a collection argument is added", arguments: collectionArgumentExamples)
     func firstElementOnly(_ example: CompatibilityExample) async throws {
-        let options = AQLOptions(collectionArguments: .firstElement, collectionKinds: .sequences)
+        let options = AQLOptions(collectionArguments: .firstElement, collectionKinds: .sequences, dotCalls: .collection)
         let wanted = try await OptionsFixture.value(of: example.legacy, in: OptionsFixture.context(.standard))
         try await OptionsFixture.check(
             example.source, yields: example.legacy, with: options,
@@ -391,6 +399,12 @@ struct AQLOptionsTests {
         (AQLOptions(textForm: .bracketed), "null + null", "''"),
         (AQLOptions(textForm: .bracketed), "null.toString()", "'null'"),
         (AQLOptions(strict: true), "Sequence{'a'}->union(Sequence{'a'})", "Sequence{'a', 'a'}"),
+        (AQLOptions(dotCalls: .collection), "Sequence{'a', 'b', 'c'}.including(OrderedSet{'d', 'e'})", "Sequence{'a', 'b', 'c', OrderedSet{'d', 'e'}}"),
+        (AQLOptions(dotCalls: .collection), "Sequence{'a'}.add(null)", "'a'"),
+        (AQLOptions(dotCalls: .collection), "Sequence{'a', Sequence{'b', 'c'}}.toString()", "'abc'"),
+        (AQLOptions(dotCalls: .collection), "Sequence{}.toString()", "''"),
+        (AQLOptions(dotCalls: .collection), "Sequence{1, 2}.toString().size()", "2"),
+        (AQLOptions(dotCalls: .collection), "Sequence{'a', 'b'}.size()", "2"),
     ]
 
     @Test("Each option changes only its own behaviour", arguments: singleOptionExamples.indices)
@@ -410,9 +424,13 @@ struct AQLOptionsTests {
         context.register(KindReporter())
         let reported = try await OptionsFixture.value(of: "OrderedSet{1}.reportKind()", in: context)
         #expect(reported as? String == EcoreCollectionKind.sequence.rawValue)
-        context.options = .standard
+        context.options = AQLOptions(dotCalls: .collection)
         let standard = try await OptionsFixture.value(of: "OrderedSet{1}.reportKind()", in: context)
         #expect(standard as? String == EcoreCollectionKind.orderedSet.rawValue)
+        context.options = .standard
+        let eachElement = try await OptionsFixture.value(of: "OrderedSet{1}.reportKind()", in: context)
+        #expect(AQLValues.areEqual(eachElement, seq()))
+        #expect(OptionsFixture.kinds(eachElement) == [.orderedSet])
     }
 
     @Test("Under the legacy options an arrow call sees a collection of any kind as a sequence")

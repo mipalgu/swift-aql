@@ -47,6 +47,7 @@ public struct AQLObjectServices: AQLServiceProvider {
             AQLService("lineSeparator") { _ in "\n" },
             AQLService("allInstances", receiver: .type) { call in
                 guard let type = call.receiver as? AQLTypeDescriptor else { return nil }
+                if call.context.dependencyRecorder.isRecording { call.context.recordExtent(of: type) }
                 var found: [any EcoreValue] = []
                 for resource in call.context.resources {
                     found.append(contentsOf: await resource.getAllObjects().filter(type.isKind))
@@ -85,6 +86,9 @@ public struct AQLObjectServices: AQLServiceProvider {
             AQLService("eGet", receiver: .object, arity: 1) { call in
                 let object = call.receiver as! any EObject
                 let name = try call.string(0)
+                if call.context.dependencyRecorder.isRecording {
+                    call.context.dependencyRecorder.recordFeature(name, of: object.id)
+                }
                 do {
                     return try await call.context.navigate(from: object, property: name)
                 } catch {
@@ -137,6 +141,7 @@ public struct AQLObjectServices: AQLServiceProvider {
             }
         }
         list += listed("eInverse") { call, object in
+            if call.context.dependencyRecorder.isRecording { call.context.dependencyRecorder.recordUnbounded() }
             var result: [any EcoreValue] = []
             for resource in call.context.resources {
                 for candidate in await resource.getAllObjects() {
@@ -188,9 +193,11 @@ public struct AQLObjectServices: AQLServiceProvider {
     ///   - object: The container.
     ///   - context: The execution context used to resolve references.
     /// - Returns: The contained objects.
+    @MainActor
     static func contents(of object: any EObject, in context: AQLExecutionContext) async throws
         -> [any EcoreValue]
     {
+        if context.dependencyRecorder.isRecording { context.dependencyRecorder.recordObject(object.id) }
         guard let eClass = object.eClass as? EClass else { return [] }
         var result: [any EcoreValue] = []
         for feature in orderedFeatures(of: eClass) {

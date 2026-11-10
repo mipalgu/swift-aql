@@ -10,8 +10,9 @@ import Foundation
 
 /// Services available on integers and reals.
 ///
-/// Provides `abs`, `min(other)`, `max(other)`, `floor`, `ceil`, `round`, `div(other)` and
-/// `mod(other)`. Standalone calls such as `min(a, b)` reach these services through the
+/// Provides `abs`, `min(other)`, `max(other)`, `floor`, `ceil`, `round`, `div(other)`,
+/// `mod(other)` and `add(other)`, which yields what `+` yields, so that `1.add(2)` is `3` and
+/// `1.add('x')` is `'1x'`. Standalone calls such as `min(a, b)` reach these services through the
 /// dispatcher's receiver rule. Operations on two integers stay integral; mixed operands
 /// produce reals.
 public struct AQLNumberServices: AQLServiceProvider {
@@ -64,6 +65,9 @@ public struct AQLNumberServices: AQLServiceProvider {
             },
             AQLService("div", receiver: .number, arity: 1) { try Self.integerOperation($0) { $0 / $1 } },
             AQLService("mod", receiver: .number, arity: 1) { try Self.integerOperation($0) { $0 % $1 } },
+            AQLService("add", receiver: .number, arity: 1) { call in
+                try AQLBinaryExpression.addition(call.receiver, call.argument(0), in: call.context)
+            },
         ]
     }
 }

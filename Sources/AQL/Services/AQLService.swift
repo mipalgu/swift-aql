@@ -249,6 +249,13 @@ public struct AQLService: Sendable {
     /// The implementation.
     public let implementation: AQLServiceImplementation
 
+    /// Whether a client registered the service, rather than it being part of the standard
+    /// library.
+    ///
+    /// The model reads of such a service cannot be followed, so calling it while
+    /// dependencies are recorded makes the record unbounded.
+    var isClientRegistered = false
+
     /// Creates a service that does not change the models.
     ///
     /// - Parameters:
@@ -361,6 +368,9 @@ public struct AQLService: Sendable {
     /// - Throws: Any error the implementation throws.
     @MainActor
     public func invoke(_ call: AQLServiceCall) async throws -> (any EcoreValue)? {
+        if isClientRegistered, call.context.dependencyRecorder.isRecording {
+            call.context.dependencyRecorder.recordUnbounded()
+        }
         guard modifiesModels else { return try await implementation(call) }
         defer { call.context.invalidateContainmentIndex() }
         return try await implementation(call)
@@ -422,7 +432,8 @@ public struct AQLServiceRegistry: Sendable {
     ///
     /// - Parameter provider: The provider to register.
     public mutating func register(_ provider: some AQLServiceProvider) {
-        for service in provider.services.reversed() {
+        for var service in provider.services.reversed() {
+            service.isClientRegistered = true
             custom[service.name, default: []].insert(service, at: 0)
         }
     }

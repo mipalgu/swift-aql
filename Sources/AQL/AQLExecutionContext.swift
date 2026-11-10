@@ -52,6 +52,25 @@ public final class AQLExecutionContext: Sendable {
     /// Debug mode flag.
     public var debug: Bool = false
 
+    /// The warnings reported while evaluating expressions in this context, oldest first.
+    ///
+    /// Evaluation reports a warning with the code ``AQLDiagnosticCode/dotCallOnElements`` and
+    /// the range of the call when a dot call on a collection reaches an element that has no
+    /// service of the name while the collection has one (see ``AQLDotCalls/eachElement``).
+    /// A navigation or another dot call on a collection that leaves out elements without the
+    /// feature or the service reports a warning with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` or ``AQLDiagnosticCode/serviceNotFound`` for each
+    /// type of element left out, unless strict mode raises an error because no element has it.
+    /// The diagnostics accumulate across evaluations: a client that wants the warnings of a
+    /// single evaluation calls ``clearDiagnostics()`` before it. A diagnostic equal to one
+    /// already held (with the same severity, code, message and range) is not added again, so
+    /// evaluating the same expressions repeatedly does not make the list grow. A warning
+    /// stays even if the evaluation that reported it then fails.
+    public private(set) var diagnostics: [SourceDiagnostic] = []
+
+    /// The diagnostics held in ``diagnostics``, for finding repeated reports quickly.
+    private var reportedDiagnostics: Set<SourceDiagnostic> = []
+
     /// The services callable from expressions evaluated in this context.
     ///
     /// The registry starts with the standard library; use ``register(_:)`` to add services.
@@ -72,8 +91,9 @@ public final class AQLExecutionContext: Sendable {
 
     /// Whether `indexOf` and `lastIndexOf` on collections return 1-based positions (0 if absent) as AQL specifies.
     ///
-    /// The default (`true`) follows the AQL specification. Set it to `false` to get the earlier
-    /// behaviour of this package: 0-based positions, -1 if absent.
+    /// The default (`true`) follows the
+    /// [AQL specification](https://eclipse.dev/acceleo/documentation/). Set it to `false` to get
+    /// the earlier behaviour of this package: 0-based positions, -1 if absent.
     public var usesOneBasedIndexOf: Bool = true
 
     /// Whether the containers found by containment queries are cached between calls.
@@ -106,6 +126,12 @@ public final class AQLExecutionContext: Sendable {
 
     /// How many times the registered resources have been asked for a container.
     private(set) var containerLookups = 0
+
+    /// The recorder of the model reads made while dependencies are recorded.
+    ///
+    /// Nothing is recorded unless a frame is open, which only
+    /// ``recordingDependencies(_:)`` and the incremental evaluators of this package do.
+    var dependencyRecorder = ModelDependencyRecorder()
 
     // MARK: - Initialisation
 
@@ -199,6 +225,25 @@ public final class AQLExecutionContext: Sendable {
         return registry
     }
 
+    // MARK: - Diagnostics
+
+    /// Removes every diagnostic from ``diagnostics``.
+    ///
+    /// Later evaluations report their diagnostics afresh, including those equal to a
+    /// diagnostic removed.
+    public func clearDiagnostics() {
+        diagnostics = []
+        reportedDiagnostics = []
+    }
+
+    /// Adds a diagnostic to ``diagnostics`` unless an equal one is already held.
+    ///
+    /// - Parameter diagnostic: The diagnostic to report.
+    func report(_ diagnostic: SourceDiagnostic) {
+        guard reportedDiagnostics.insert(diagnostic).inserted else { return }
+        diagnostics.append(diagnostic)
+    }
+
     // MARK: - Services
 
     /// Registers a service provider.
@@ -260,6 +305,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Returns: The container, or `nil` if no registered resource holds the object in a
     ///   containment reference.
     private func resourceContainer(of id: EUUID) async -> (any EObject)? {
+        if dependencyRecorder.isRecording { dependencyRecorder.recordContainer(of: id) }
         if cachesContainmentIndex, let cached = cachedContainers[id] { return cached }
         containerLookups += 1
         var found: (any EObject)?
@@ -283,6 +329,7 @@ public final class AQLExecutionContext: Sendable {
     ///   registered objects.
     /// - Throws: Any error raised while reading the contents of registered objects.
     private func registeredParents() async throws -> [EUUID: any EObject] {
+        if dependencyRecorder.isRecording { dependencyRecorder.recordContainmentStructure() }
         if cachesContainmentIndex, let containmentIndex { return containmentIndex }
         var index: [EUUID: any EObject] = [:]
         for resource in resources {
@@ -294,6 +341,82 @@ public final class AQLExecutionContext: Sendable {
         }
         if cachesContainmentIndex { containmentIndex = index }
         return index
+    }
+
+    // MARK: - Dependency Recording
+
+    /// Evaluates a body while recording the model reads that it makes.
+    ///
+    /// Every navigation, enumeration of instances and containment query that the body makes
+    /// through this context is recorded, so that the result can be recomputed only when a
+    /// change affects it (see ``ModelDependencies/isAffected(by:)``). Calls of services that
+    /// clients registered, which may read the models in ways the context cannot see, make
+    /// the record unbounded. Recordings may be nested; the reads of an inner recording are
+    /// also part of the outer one. Outside a recording, nothing is recorded.
+    ///
+    /// - Parameter body: The evaluation to record.
+    /// - Returns: The body's result and the dependencies it recorded.
+    /// - Throws: Whatever the body throws; the reads recorded before the error are then
+    ///   part of any enclosing recording.
+    public func recordingDependencies<T>(
+        _ body: () async throws -> T
+    ) async rethrows -> (value: T, dependencies: ModelDependencies) {
+        dependencyRecorder.begin()
+        do {
+            let value = try await body()
+            return (value, dependencyRecorder.end())
+        } catch {
+            dependencyRecorder.end()
+            throw error
+        }
+    }
+
+    /// Records the enumeration of the instances of a type.
+    ///
+    /// The root type of all objects, and the type of any value, depend on every creation
+    /// and deletion, which the containment structure stands for.
+    ///
+    /// - Parameter type: The type whose instances are enumerated.
+    func recordExtent(of type: AQLTypeDescriptor) {
+        if type.typeName == AQLBuiltInType.any || type.typeName == AQLEcoreMetaTypes.root {
+            dependencyRecorder.recordContainmentStructure()
+        } else {
+            dependencyRecorder.recordExtent(type.typeName)
+        }
+    }
+
+    /// Whether model reads are being recorded.
+    public var isRecordingDependencies: Bool { dependencyRecorder.isRecording }
+
+    /// Records the read of a feature, or of a containment property, of an object.
+    ///
+    /// - Parameters:
+    ///   - property: The name of the feature or containment property.
+    ///   - object: The object read from.
+    func recordRead(of property: String, from object: any EObject) {
+        let feature = (object.eClass as? EClass)?.getStructuralFeature(name: property)
+        if feature == nil, let navigation = EObjectNavigationProperty(rawValue: property) {
+            switch navigation {
+            case .eContainer, .eContainingFeature:
+                dependencyRecorder.recordContainer(of: object.id)
+            case .eContents:
+                dependencyRecorder.recordObject(object.id)
+            case .eAllContents:
+                dependencyRecorder.recordObject(object.id)
+                dependencyRecorder.recordContainmentStructure()
+            }
+            return
+        }
+        dependencyRecorder.recordFeature(property, of: object.id)
+        if let attribute = feature as? EAttribute, attribute.derived || attribute.volatile {
+            dependencyRecorder.recordUnbounded()
+        } else if let reference = feature as? EReference {
+            if reference.derived || reference.volatile {
+                dependencyRecorder.recordUnbounded()
+            } else if reference.transient {
+                dependencyRecorder.recordContainer(of: object.id)
+            }
+        }
     }
 
     // MARK: - Collections
@@ -379,6 +502,7 @@ public final class AQLExecutionContext: Sendable {
             if let selfObject = (try? await getVariable("self")) as? (any EObject) {
                 // Try to navigate from self
                 // Note: In strict AQL, this might only happen if the variable lookup fails.
+                if dependencyRecorder.isRecording { recordRead(of: name, from: selfObject) }
                 if let result = try? await executionEngine.navigate(
                     from: selfObject, property: name)
                 {
@@ -412,18 +536,54 @@ public final class AQLExecutionContext: Sendable {
     ///
     /// Collections are navigated element by element and the results flattened into a collection
     /// of the same kind (so navigating from an ordered set or a set leaves out repeated results,
-    /// unless ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``). When a derived,
+    /// unless ``AQLOptions/collectionKinds`` is ``AQLCollectionKinds/sequences``). While
+    /// ``AQLOptions/dotCalls`` is ``AQLDotCalls/eachElement``, an element that is not an
+    /// object, or an object without the feature and without a client-registered zero-argument
+    /// service of that name, contributes nothing; in strict mode, a collection none of whose
+    /// elements has the feature raises an error instead. When a derived,
     /// volatile or transient feature of an object has no value (nil or an empty collection), a
     /// client-registered zero-argument service of the same name is called on the object instead,
-    /// so that templates can compute such features without writing parentheses.
+    /// so that templates can compute such features without writing parentheses. Each type of
+    /// element left out is reported once in ``diagnostics`` as a warning with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` and no range.
     /// - Returns: Navigation result, or nil if source is nil or not an EObject
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
+        try await navigate(from: object, property: property, range: nil)
+    }
+
+    /// Navigates a property from a source object, reporting the elements left out with the
+    /// range of the navigation.
+    ///
+    /// The navigation is that of ``navigate(from:property:)``. The warnings with the code
+    /// ``AQLDiagnosticCode/featureNotFound`` that it reports carry the given range.
+    ///
+    /// - Parameters:
+    ///   - object: The source object or collection.
+    ///   - property: The name of the feature.
+    ///   - range: Where the navigation was written, if known.
+    /// - Returns: The navigation result, or `nil` if the source is `nil` or not an object.
+    /// - Throws: Any error raised by the navigation.
+    func navigate(from object: (any EcoreValue)?, property: String, range: SourceRange?) async throws -> (
+        any EcoreValue
+    )? {
+        if let collection = object, options.dotCalls == .eachElement, AQLValues.elements(of: collection) != nil {
+            return try await applyToEachElement(of: collection, named: property) { element in
+                try await navigateElement(element, property: property)
+            } reportingMissing: { types in
+                for type in types {
+                    report(
+                        SourceDiagnostic(
+                            severity: .warning, code: AQLDiagnosticCode.featureNotFound,
+                            message: AQLDiagnosticMessage.featureNotFound(property, in: type), range: range))
+                }
+            }
+        }
         if let items = AQLValues.elements(of: object) {
             var collected: [any EcoreValue] = []
             for item in items {
-                if let value = try await navigate(from: item, property: property) {
+                if let value = try await navigate(from: item, property: property, range: range) {
                     collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
                 }
             }
@@ -434,6 +594,7 @@ public final class AQLExecutionContext: Sendable {
             return nil
         }
 
+        if dependencyRecorder.isRecording { recordRead(of: property, from: eObject) }
         let value = try await executionEngine.navigate(from: eObject, property: property)
         guard Self.hasNoValue(value), Self.isComputed(property, of: eObject),
             let service = services.find(
@@ -442,6 +603,102 @@ public final class AQLExecutionContext: Sendable {
         else { return value }
         return try await service.invoke(
             AQLServiceCall(name: property, receiver: eObject, arguments: [], context: self))
+    }
+
+    /// Navigates a feature from one element of a collection, as a navigation over the
+    /// collection does while ``AQLOptions/dotCalls`` is ``AQLDotCalls/eachElement``.
+    ///
+    /// An object without the feature falls back to a client-registered zero-argument service
+    /// of the same name, as a navigation from a single object does.
+    ///
+    /// - Parameters:
+    ///   - element: The element, which is not a collection.
+    ///   - property: The name of the feature.
+    /// - Returns: The value of the feature, or ``AQLElementResult/missing`` if the element is
+    ///   not an object or has neither the feature nor such a service.
+    /// - Throws: Any error raised by the fallback service.
+    private func navigateElement(_ element: any EcoreValue, property: String) async throws -> AQLElementResult {
+        guard let object = element as? any EObject else { return .missing }
+        do {
+            return .value(try await navigate(from: object, property: property, range: nil))
+        } catch {
+            guard
+                let service = services.find(
+                    name: property, receiver: object, hasReceiver: true, argumentCount: 0, customOnly: true)
+            else { return .missing }
+            return .value(
+                try await service.invoke(
+                    AQLServiceCall(name: property, receiver: object, arguments: [], context: self)))
+        }
+    }
+
+    // MARK: - Element-wise application
+
+    /// Applies a dot call or a navigation to each element of a collection, as Eclipse AQL does.
+    ///
+    /// An element that is itself a collection has the call applied to each of its elements in
+    /// turn. The results are collected in a collection of the kind of the receiver (see
+    /// ``collectionKind(of:)``): a result that is a collection contributes its elements, and a
+    /// null result or an element for which the call reports ``AQLElementResult/missing``
+    /// contributes nothing. Once every element has been reached, the types of the elements left
+    /// out go to `reportMissing`, unless strict mode raises an error instead.
+    ///
+    /// - Parameters:
+    ///   - receiver: The collection to apply the call to.
+    ///   - name: The name of the service or feature, for the error that strict mode raises.
+    ///   - apply: The call on one element that is not a collection.
+    ///   - reportMissing: Receives the distinct types of the elements for which the call reports
+    ///     ``AQLElementResult/missing``, in the order first reached, if there are any.
+    /// - Returns: The collected results.
+    /// - Throws: ``AQLExecutionError/invalidOperation(_:)`` in strict mode if the call reports
+    ///   ``AQLElementResult/missing`` for every element it reaches and there is at least one
+    ///   such element, and any error that `apply` throws.
+    func applyToEachElement(
+        of receiver: any EcoreValue, named name: String,
+        _ apply: (any EcoreValue) async throws -> AQLElementResult,
+        reportingMissing reportMissing: ([AQLValueType]) -> Void
+    ) async throws -> EcoreValueArray {
+        var reach = AQLElementReach()
+        let result = try await applyToEachElement(of: receiver, reach: &reach, apply)
+        if options.strict, reach.missesEveryElement {
+            throw AQLExecutionError.invalidOperation(
+                "No element of the collection has a service or feature named '\(name)'")
+        }
+        if !reach.missedTypes.isEmpty { reportMissing(reach.missedTypes.elements) }
+        return result
+    }
+
+    /// Applies a call to each element of a collection, recording which elements have it.
+    ///
+    /// - Parameters:
+    ///   - receiver: The collection to apply the call to.
+    ///   - reach: The record of the elements that have the call and of those that lack it.
+    ///   - apply: The call on one element that is not a collection.
+    /// - Returns: The collected results.
+    /// - Throws: Any error that `apply` throws.
+    private func applyToEachElement(
+        of receiver: any EcoreValue, reach: inout AQLElementReach,
+        _ apply: (any EcoreValue) async throws -> AQLElementResult
+    ) async throws -> EcoreValueArray {
+        var collected: [any EcoreValue] = []
+        for element in AQLValues.elements(of: receiver) ?? [] {
+            let value: (any EcoreValue)?
+            if AQLValues.elements(of: element) != nil {
+                value = try await applyToEachElement(of: element, reach: &reach, apply)
+            } else {
+                switch try await apply(element) {
+                case .value(let result):
+                    reach.found = true
+                    value = result
+                case .missing:
+                    reach.missedTypes.append(AQLValueType(of: element))
+                    value = nil
+                }
+            }
+            guard let value else { continue }
+            collected.append(contentsOf: AQLValues.elements(of: value) ?? [value])
+        }
+        return collection(collected, kind: collectionKind(of: receiver))
     }
 
     private static func hasNoValue(_ value: (any EcoreValue)?) -> Bool {
@@ -458,6 +715,57 @@ public final class AQLExecutionContext: Sendable {
             return reference.derived || reference.volatile || reference.transient
         }
         return false
+    }
+}
+
+/// The outcome of applying a dot call or a navigation to one element of a collection.
+enum AQLElementResult {
+    /// The element has the service or the feature, which gives this value (`nil` for null).
+    case value((any EcoreValue)?)
+
+    /// The element has no service or feature of the name.
+    case missing
+}
+
+/// Which of the elements reached by an element-wise call have the call.
+struct AQLElementReach {
+    /// Whether some element has the service or the feature.
+    var found = false
+
+    /// The distinct types of the elements that lack the service or the feature, in the order
+    /// first reached.
+    var missedTypes: OrderedSet<AQLValueType> = []
+
+    /// Whether every element reached lacks the service or the feature, and at least one was
+    /// reached.
+    var missesEveryElement: Bool { !missedTypes.isEmpty && !found }
+}
+
+/// The type of a value as diagnostics name it.
+struct AQLValueType: Hashable {
+    /// The name of the type: the class name of an object, the AQL name of a primitive type, the
+    /// kind of a collection, or `null`.
+    let name: String
+
+    /// Whether the value is a model object.
+    let isObject: Bool
+
+    /// Determines the type of a value.
+    ///
+    /// - Parameter value: The value.
+    init(of value: (any EcoreValue)?) {
+        isObject = value is any EObject
+        switch value {
+        case nil: name = AQLSyntax.nullText
+        case let object as any EObject: name = object.eClass.name
+        case is String: name = AQLBuiltInType.string
+        case is Bool: name = AQLBuiltInType.boolean
+        case is Double, is Float: name = AQLBuiltInType.real
+        case let value? where AQLValues.integer(value) != nil: name = AQLBuiltInType.integer
+        case let value? where AQLValues.kind(of: value) != nil:
+            name = AQLValues.kind(of: value)?.rawValue ?? String(describing: type(of: value))
+        case let value?: name = String(describing: type(of: value))
+        }
     }
 }
 
