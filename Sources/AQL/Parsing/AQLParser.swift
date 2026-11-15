@@ -203,7 +203,7 @@ extension AQLSyntax {
     ///
     /// This never fails and does not parse. Comments are included, and text that is not valid
     /// AQL (unterminated strings, unknown characters) comes back as
-    /// ``SourceTokenKind/invalid`` tokens, so every part of the text that is not blank is
+    /// [`SourceTokenKind.invalid`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/sourcetokenkind/invalid/) tokens, so every part of the text that is not blank is
     /// covered by exactly one token.
     ///
     /// - Parameter source: The AQL text.

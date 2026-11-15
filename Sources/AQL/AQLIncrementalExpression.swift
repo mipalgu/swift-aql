@@ -94,8 +94,8 @@ extension AQLQueryChange {
 /// An incremental expression evaluates its expression once while recording what the
 /// evaluation reads from the models: the features of the objects navigated, the classes
 /// whose instances are enumerated with `allInstances`, and the containment queries made
-/// (see ``ModelDependencies``). After the models have been changed through the editing
-/// operations of ``Resource``, ``update(for:)`` re-evaluates the expression only if one of
+/// (see [`ModelDependencies`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencies/)). After the models have been changed through the editing
+/// operations of [`Resource`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/), ``update(for:)`` re-evaluates the expression only if one of
 /// the changes affects something that the last evaluation read, and reports the change of
 /// the value. This follows the dependency tracking of incremental query engines such as
 /// NMF Expressions and VIATRA: a re-evaluated value is always the value that a fresh
@@ -204,7 +204,7 @@ public final class AQLIncrementalExpression {
     ///
     /// The cached navigation results of the context's execution engine and its cached
     /// containers are discarded for the changed parts of the models first (see
-    /// ``ECoreExecutionEngine/invalidateCaches(for:)``). The expression is then re-evaluated
+    /// [`ECoreExecutionEngine.invalidateCaches(for:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/ecoreexecutionengine/invalidatecaches(for:)/)). The expression is then re-evaluated
     /// if, and only if, the changes affect what its latest evaluation read.
     ///
     /// - Parameter changes: The changes made to the models since the latest update, in order.
@@ -315,10 +315,10 @@ public struct AQLQueryUpdate: Sendable {
 /// Keeps a set of incremental expressions up to date as the models of a context change.
 ///
 /// An observer watches the resources of an ``AQLExecutionContext`` for changes, which
-/// their editing operations report (see ``Resource/addChangeObserver(_:)``). On
+/// their editing operations report (see [`Resource.addChangeObserver(_:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/addchangeobserver(_:)/)). On
 /// ``refresh()``, it summarises the changes collected since the previous refresh once,
 /// discards the stale cached state of the context, finds the registered expressions that
-/// the changes affect through a ``ModelDependencyIndex``, re-evaluates only those, and
+/// the changes affect through a [`ModelDependencyIndex`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencyindex/), re-evaluates only those, and
 /// reports their changes, both as the result and to each expression's handler. The cost of
 /// a refresh grows with the size of the changes and of the affected expressions, not with
 /// the number of registered expressions.
@@ -375,7 +375,7 @@ public final class AQLQueryObserver {
 
     /// The number of model parts that the registered expressions are recorded to depend on.
     ///
-    /// It is the ``ModelDependencyIndex/entryCount`` of the index of their dependencies.
+    /// It is the [`ModelDependencyIndex.entryCount`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencyindex/entrycount/) of the index of their dependencies.
     public var dependencyEntryCount: Int { index.entryCount }
 
     /// Starts watching the resources of the context for changes.
@@ -460,7 +460,7 @@ public final class AQLQueryObserver {
     /// Brings every registered expression up to date with changes reported elsewhere.
     ///
     /// Use this method when the observer does not watch the resources itself, for example
-    /// with changes collected by ``Resource/recordingChanges(_:)``.
+    /// with changes collected by [`Resource.recordingChanges(_:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/recordingchanges(_:)/).
     ///
     /// - Parameter changes: The changes made to the models, in order.
     /// - Returns: The updates of the expressions that were re-evaluated, in registration order.

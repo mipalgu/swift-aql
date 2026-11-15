@@ -27,6 +27,16 @@ let diagnostics = await model.validate(evaluator: AQLDeepConstraintEvaluator())
 the views, so other objects keep the standard services. MTL templates use them through the
 `serviceProviders` parameter of their generator.
 
+## Related Documentation
+
+- [swift-aql command-line tool](https://mipalgu.github.io/swift-modelling/documentation/swift_aql/index.html)
+- [Multi-Level Modelling with Potency](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/multilevel-01-deep-modelling/index.html) - the multi-level modelling tutorial
+- [AQL Basics](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-01-basics/index.html) and [all tutorials](https://mipalgu.github.io/swift-modelling/tutorials/tutorials/index.html)
+- [MultiLevel](https://mipalgu.github.io/swift-ecore/documentation/multilevel/) in [swift-ecore](https://mipalgu.github.io/swift-ecore/) - the deep models that these services query
+- [AQL](https://mipalgu.github.io/swift-aql/documentation/aql/) - the query language itself
+- [swift-mtl](https://mipalgu.github.io/swift-mtl/) - MTL templates use these services through `serviceProviders`
+- [swift-modelling](https://mipalgu.github.io/swift-modelling/) - command-line tools and tutorials
+
 ## Topics
 
 ### Constraints

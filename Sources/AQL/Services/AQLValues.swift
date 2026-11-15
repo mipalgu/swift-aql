@@ -11,9 +11,9 @@ import Foundation
 
 /// Value helpers shared by the standard library and by client-written services.
 ///
-/// The helpers implement the AQL value model on top of ``EcoreValue``:
+/// The helpers implement the AQL value model on top of [`EcoreValue`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorevalue/):
 /// collections are `EcoreValueArray` (or any array of values, which counts as
-/// a sequence) and carry their ``EcoreCollectionKind``, objects are compared
+/// a sequence) and carry their [`EcoreCollectionKind`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorecollectionkind/), objects are compared
 /// by identity, and numbers compare by value across integer and real
 /// representations.
 public enum AQLValues {
@@ -43,7 +43,7 @@ public enum AQLValues {
     /// Wraps elements as a sequence.
     ///
     /// - Parameter elements: The elements.
-    /// - Returns: The collection value, a ``EcoreCollectionKind/sequence``.
+    /// - Returns: The collection value, a [`EcoreCollectionKind.sequence`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorecollectionkind/sequence/).
     public static func collection(_ elements: [any EcoreValue]) -> EcoreValueArray {
         EcoreValueArray(elements)
     }

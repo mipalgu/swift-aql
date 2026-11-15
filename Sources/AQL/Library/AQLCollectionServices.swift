@@ -12,7 +12,7 @@ import Foundation
 /// The AQL collection library (sequences, ordered sets, sets and bags).
 ///
 /// The `.` and `->` call forms reach the same implementations. Collections are held as
-/// `EcoreValueArray` and carry their ``EcoreCollectionKind``. Every kind keeps its elements in
+/// `EcoreValueArray` and carry their [`EcoreCollectionKind`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorecollectionkind/). Every kind keeps its elements in
 /// order; ordered sets and sets hold each element at most once, sequences and bags may repeat
 /// elements. An arrow call on a value that is not a collection sees a set holding that value
 /// (an empty set for null). Positions are 1-based as in AQL (`at`, `insertAt`, `subSequence`,

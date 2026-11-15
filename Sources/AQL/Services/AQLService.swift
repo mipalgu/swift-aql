@@ -219,7 +219,7 @@ public typealias AQLServiceImplementation =
 ///
 /// AQL expressions are free of side effects, and services are expected to be as well.
 /// A service that changes the model (for example by setting a feature through its
-/// ``Resource``) must say so with ``modifiesModels``, so that an execution context that
+/// [`Resource`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/)) must say so with ``modifiesModels``, so that an execution context that
 /// caches the containment structure drops the cache after each call of the service.
 public struct AQLService: Sendable {
     /// The service name.

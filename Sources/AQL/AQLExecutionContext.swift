@@ -107,9 +107,9 @@ public final class AQLExecutionContext: Sendable {
     /// containers of all registered objects are found together and reused in the same way.
     ///
     /// The cache is dropped when a resource is added with ``addResource(_:)``, after each call
-    /// of a service that declares ``AQLService/modifiesModels``, and when caching is switched
+    /// of a service that declares [`AQLService.modifiesModels`](https://mipalgu.github.io/swift-aql/documentation/aql/aqlservice/modifiesmodels/), and when caching is switched
     /// off. Any other change to the registered models while caching is on (for example by
-    /// code that sets features through a ``Resource`` between evaluations) must be followed
+    /// code that sets features through a [`Resource`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/) between evaluations) must be followed
     /// by a call of ``invalidateContainmentIndex()``.
     public var cachesContainmentIndex: Bool = false {
         didSet {
@@ -174,10 +174,10 @@ public final class AQLExecutionContext: Sendable {
     /// Creates a new AQL execution context with an execution engine of its own and the given
     /// options.
     ///
-    /// The context creates an ``ECoreExecutionEngine`` without registered models, which suits
+    /// The context creates an [`ECoreExecutionEngine`](https://mipalgu.github.io/swift-ecore/documentation/ecore/ecoreexecutionengine/) without registered models, which suits
     /// expressions that only navigate the objects bound to their variables. Unless told
     /// otherwise, the engine reads an unset feature as its default value, as the Eclipse
-    /// Modeling Framework does; pass ``UnsetFeatureReads/undefined`` to read unset features
+    /// Modeling Framework does; pass [`UnsetFeatureReads.undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/) to read unset features
     /// as `nil` instead.
     ///
     /// - Parameters:
@@ -198,8 +198,8 @@ public final class AQLExecutionContext: Sendable {
     /// as in version 0.6.
     ///
     /// The context evaluates expressions with ``AQLOptions/legacy``. It creates an
-    /// ``ECoreExecutionEngine`` without registered models, which reads an unset feature as
-    /// its default value unless told otherwise; pass ``UnsetFeatureReads/undefined`` to read
+    /// [`ECoreExecutionEngine`](https://mipalgu.github.io/swift-ecore/documentation/ecore/ecoreexecutionengine/) without registered models, which reads an unset feature as
+    /// its default value unless told otherwise; pass [`UnsetFeatureReads.undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/) to read
     /// unset features as `nil` instead.
     ///
     /// - Parameters:
@@ -349,7 +349,7 @@ public final class AQLExecutionContext: Sendable {
     ///
     /// Every navigation, enumeration of instances and containment query that the body makes
     /// through this context is recorded, so that the result can be recomputed only when a
-    /// change affects it (see ``ModelDependencies/isAffected(by:)``). Calls of services that
+    /// change affects it (see [`ModelDependencies.isAffected(by:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencies/isaffected(by:)/)). Calls of services that
     /// clients registered, which may read the models in ways the context cannot see, make
     /// the record unbounded. Recordings may be nested; the reads of an inner recording are
     /// also part of the outer one. Outside a recording, nothing is recorded.
@@ -426,7 +426,7 @@ public final class AQLExecutionContext: Sendable {
     /// - Parameter value: The value to inspect.
     /// - Returns: The kind of a collection value while ``AQLOptions/collectionKinds`` is
     ///   ``AQLCollectionKinds/distinguished``, otherwise, and for a value that is not a
-    ///   collection, ``EcoreCollectionKind/sequence``.
+    ///   collection, [`EcoreCollectionKind.sequence`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorecollectionkind/sequence/).
     func collectionKind(of value: (any EcoreValue)?) -> EcoreCollectionKind {
         guard options.collectionKinds == .distinguished else { return .sequence }
         return AQLValues.kind(of: value) ?? .sequence
