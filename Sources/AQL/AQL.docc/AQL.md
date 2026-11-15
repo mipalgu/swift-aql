@@ -47,6 +47,37 @@ if let query = parsed.expression {
 }
 ```
 
+## Related Documentation
+
+- [swift-aql command-line tool](https://mipalgu.github.io/swift-modelling/documentation/swift_aql/index.html) - the `swift-aql` tool of [swift-modelling](https://mipalgu.github.io/swift-modelling/)
+
+### Tutorials
+
+- [AQL Basics](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-01-basics/index.html)
+- [Filtering and Selection](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-02-filtering-selection/index.html)
+- [Collection Operations](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-03-collection-operations/index.html)
+- [AQL in MTL Templates](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-04-aql-in-mtl/index.html)
+- [Complex Queries](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-05-complex-queries/index.html)
+- [Querying Models with AQL](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/06-querying-models/index.html)
+- [Multi-Level Modelling with Potency](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/multilevel-01-deep-modelling/index.html)
+- [Reusing Modules with Model Typing](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/typing-01-check-compat/index.html)
+- [All tutorials](https://mipalgu.github.io/swift-modelling/tutorials/tutorials/index.html)
+
+### Related Packages
+
+- [ECore](https://mipalgu.github.io/swift-ecore/documentation/ecore/) and [OCL](https://mipalgu.github.io/swift-ecore/documentation/ocl/) in [swift-ecore](https://mipalgu.github.io/swift-ecore/) - the metamodelling framework that AQL queries
+- [swift-mtl](https://mipalgu.github.io/swift-mtl/) - MTL templates evaluate AQL expressions
+- [swift-atl](https://mipalgu.github.io/swift-atl/) - ATL transformations use AQL for their expressions
+- [swift-henshin](https://mipalgu.github.io/swift-henshin/) - Henshin graph transformation
+- [swift-modelling](https://mipalgu.github.io/swift-modelling/) - command-line tools, code generators and tutorials
+- [AQLMultiLevel](https://mipalgu.github.io/swift-aql/documentation/aqlmultilevel/) - AQL for multi-level models
+
+### Standards
+
+- [Eclipse Acceleo](https://eclipse.dev/acceleo/)
+- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
+- [Eclipse Modeling Framework (EMF)](https://eclipse.dev/emf/)
+
 ## Topics
 
 ### Essentials
@@ -116,9 +147,3 @@ if let query = parsed.expression {
 
 - ``AQLSyntaxError``
 - ``AQLExecutionError``
-
-## See Also
-
-- [Eclipse Acceleo](https://eclipse.dev/acceleo/)
-- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
-- [Eclipse Modeling Framework (EMF)](https://eclipse.dev/emf/)

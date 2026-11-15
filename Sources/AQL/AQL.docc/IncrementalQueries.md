@@ -45,6 +45,15 @@ read anything, so an expression that uses them is evaluated again after every ch
 Expressions are re-evaluated as a whole: a change that affects one element of a large
 collection re-evaluates the whole expression.
 
+## Related Documentation
+
+- [swift-aql command-line tool](https://mipalgu.github.io/swift-modelling/documentation/swift_aql/index.html)
+- [AQL Basics](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/aql-01-basics/index.html) - the first AQL tutorial
+- [Querying Models with AQL](https://mipalgu.github.io/swift-modelling/tutorials/swiftmodelling/06-querying-models/index.html)
+- [All tutorials](https://mipalgu.github.io/swift-modelling/tutorials/tutorials/index.html)
+- [ECore](https://mipalgu.github.io/swift-ecore/documentation/ecore/) in [swift-ecore](https://mipalgu.github.io/swift-ecore/) - the models that AQL queries
+- [swift-mtl](https://mipalgu.github.io/swift-mtl/), [swift-atl](https://mipalgu.github.io/swift-atl/) and [swift-modelling](https://mipalgu.github.io/swift-modelling/)
+
 ## Topics
 
 ### Incremental Evaluation
